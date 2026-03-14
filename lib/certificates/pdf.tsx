@@ -4,57 +4,101 @@ import QRCode from 'qrcode'
 
 const styles = StyleSheet.create({
   page: {
-    padding: 60,
+    padding: 40,
     fontFamily: 'Helvetica',
+    justifyContent: 'center',
   },
-  container: {
+  border: {
+    border: '2 solid #000',
+    padding: 30,
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  title: {
-    fontSize: 32,
+  orgName: {
+    fontSize: 14,
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  deptName: {
+    fontSize: 12,
+    color: '#666',
     marginBottom: 20,
     textAlign: 'center',
+  },
+  title: {
+    fontSize: 28,
     fontWeight: 'bold',
-  },
-  subtitle: {
-    fontSize: 18,
-    marginBottom: 40,
+    marginBottom: 20,
     textAlign: 'center',
   },
-  text: {
-    fontSize: 14,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  label: {
+  certifyText: {
     fontSize: 12,
-    marginTop: 30,
-    marginBottom: 5,
-    textAlign: 'center',
     color: '#666',
-  },
-  code: {
-    fontSize: 10,
-    marginTop: 20,
+    marginBottom: 8,
     textAlign: 'center',
-    color: '#999',
+  },
+  recipientName: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  sessionText: {
+    fontSize: 12,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  dateText: {
+    fontSize: 11,
+    color: '#666',
+    marginBottom: 25,
+    textAlign: 'center',
+  },
+  signatureSection: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  signatureText: {
+    fontSize: 20,
+    fontFamily: 'Helvetica-Oblique',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  signatureLine: {
+    borderBottom: '1 solid #000',
+    width: 200,
+    marginBottom: 4,
+  },
+  leadName: {
+    fontSize: 11,
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  leadLabel: {
+    fontSize: 9,
+    color: '#666',
+    textAlign: 'center',
+  },
+  footer: {
+    marginTop: 20,
+    alignItems: 'center',
   },
   qrCode: {
-    width: 100,
-    height: 100,
-    marginTop: 20,
-    alignSelf: 'center',
+    width: 60,
+    height: 60,
+    marginBottom: 4,
   },
-  divider: {
-    borderBottom: '1 solid #000',
-    marginVertical: 20,
-    width: '100%',
+  footerText: {
+    fontSize: 8,
+    color: '#999',
+    textAlign: 'center',
   },
 })
 
-interface CertificateData {
+export interface CertificateData {
   orgName: string
   departmentName: string
   sessionTitle: string
@@ -64,36 +108,50 @@ interface CertificateData {
   certificateCode: string
   issuedDate: string
   verifyUrl: string
+  leadName?: string
 }
 
 const CertificateDocument = ({ data, qrCodeDataUrl }: { data: CertificateData; qrCodeDataUrl: string }) => (
   <Document>
-    <Page size="A4" style={styles.page}>
-      <View style={styles.container}>
-        <Text style={styles.title}>CERTIFICATE OF PARTICIPATION</Text>
-        <View style={styles.divider} />
-        <Text style={styles.subtitle}>This is to certify that</Text>
-        <Text style={styles.text}>{data.recipientName}</Text>
-        <Text style={styles.text}>has {data.role === 'Teacher' ? 'delivered' : 'attended'}</Text>
-        <Text style={styles.text}>{data.sessionTitle}</Text>
-        <Text style={styles.text}>on {data.sessionDate}</Text>
-        <Text style={styles.label}>Organization: {data.orgName}</Text>
-        <Text style={styles.label}>Department: {data.departmentName}</Text>
-        <Text style={styles.label}>Issued: {data.issuedDate}</Text>
-        <Text style={styles.code}>Certificate ID: {data.certificateCode}</Text>
-        {qrCodeDataUrl && (
-          <Image src={qrCodeDataUrl} style={styles.qrCode} />
-        )}
+    <Page size="A4" orientation="landscape" style={styles.page}>
+      <View style={styles.border}>
+        <Text style={styles.orgName}>{data.orgName}</Text>
+        <Text style={styles.deptName}>{data.departmentName}</Text>
+        <Text style={styles.title}>Certificate of Attendance</Text>
+        <Text style={styles.certifyText}>This is to certify that</Text>
+        <Text style={styles.recipientName}>{data.recipientName}</Text>
+        <Text style={styles.sessionText}>
+          {data.role === 'Teacher' ? 'delivered' : 'attended'} {data.sessionTitle}
+        </Text>
+        <Text style={styles.dateText}>{data.sessionDate}</Text>
+
+        <View style={styles.signatureSection}>
+          {data.leadName ? (
+            <Text style={styles.signatureText}>{data.leadName}</Text>
+          ) : (
+            <View style={styles.signatureLine} />
+          )}
+          {data.leadName ? (
+            <Text style={styles.leadName}>{data.leadName}</Text>
+          ) : null}
+          <Text style={styles.leadLabel}>Teaching Lead</Text>
+        </View>
+
+        <View style={styles.footer}>
+          {qrCodeDataUrl && (
+            <Image src={qrCodeDataUrl} style={styles.qrCode} />
+          )}
+          <Text style={styles.footerText}>Certificate ID: {data.certificateCode}</Text>
+        </View>
       </View>
     </Page>
   </Document>
 )
 
 export async function generateCertificatePDF(data: CertificateData): Promise<Buffer> {
-  // Generate QR code
   const qrCodeDataUrl = await QRCode.toDataURL(data.verifyUrl, {
-    width: 200,
-    margin: 2,
+    width: 120,
+    margin: 1,
   })
 
   const doc = <CertificateDocument data={data} qrCodeDataUrl={qrCodeDataUrl} />

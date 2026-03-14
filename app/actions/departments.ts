@@ -157,6 +157,49 @@ export async function getMyModeratedDepartment() {
   return departments.length > 0 ? departments[0] : null
 }
 
+export async function getDepartmentLeadSettings(departmentId: string) {
+  await requireAuth()
+  const orgId = await requireOrg()
+  const supabase = await createSupabaseClient()
+
+  const { data, error } = await supabase
+    .from('departments')
+    .select('lead_name')
+    .eq('id', departmentId)
+    .eq('org_id', orgId)
+    .single()
+
+  if (error) {
+    throw new Error(`Failed to fetch department settings: ${error.message}`)
+  }
+
+  return { leadName: data.lead_name || '' }
+}
+
+export async function updateDepartmentLeadSettings(
+  departmentId: string,
+  leadName: string
+) {
+  await requireDepartmentModerator(departmentId)
+  const orgId = await requireOrg()
+  const supabase = await createSupabaseServiceClient()
+
+  const { error } = await supabase
+    .from('departments')
+    .update({
+      lead_name: leadName.trim() || null,
+    })
+    .eq('id', departmentId)
+    .eq('org_id', orgId)
+
+  if (error) {
+    throw new Error(`Failed to update department settings: ${error.message}`)
+  }
+
+  revalidatePath('/dashboard')
+  revalidatePath(`/departments/${departmentId}`)
+}
+
 export async function leaveDepartment(departmentId: string) {
   const userId = await requireAuth()
   const supabase = await createSupabaseServiceClient()

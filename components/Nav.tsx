@@ -14,9 +14,10 @@ interface AdminLink {
 
 interface NavProps {
   adminLink?: AdminLink | null
+  roleLabel?: string | null
 }
 
-export function Nav({ adminLink }: NavProps) {
+export function Nav({ adminLink, roleLabel }: NavProps) {
   const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
@@ -67,27 +68,27 @@ export function Nav({ adminLink }: NavProps) {
           
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-6">
-            <div className="flex gap-4 font-mono text-sm">
+            <div className="flex items-center gap-3 font-mono text-sm">
               <Link href="/dashboard" className="hover:underline">
                 Dashboard
               </Link>
-              <Link href="/departments" className="hover:underline">
-                Departments
+              <span className="text-gray-400">|</span>
+              <Link href="/audit" className="hover:underline">
+                Audit
               </Link>
-              <Link href="/certificates" className="hover:underline">
-                Certificates
-              </Link>
-              {adminLink && (
-                <Link href={adminLink.href} className="hover:underline">
-                  {adminLink.label}
-                </Link>
-              )}
             </div>
             <div className="flex items-center gap-4 ml-4">
               {!loading && user && (
-                <span className="font-mono text-sm text-gray-600 truncate max-w-[150px]">
-                  {user.email}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm text-gray-600 truncate max-w-[150px]">
+                    {user.email}
+                  </span>
+                  {roleLabel && (
+                    <span className="font-mono text-xs border border-black px-2 py-0.5 whitespace-nowrap">
+                      {roleLabel}
+                    </span>
+                  )}
+                </div>
               )}
               <Button variant="secondary" onClick={handleSignOut}>
                 Sign Out
@@ -109,42 +110,33 @@ export function Nav({ adminLink }: NavProps) {
         {mobileMenuOpen && (
           <div className="md:hidden mt-4 pt-4 border-t border-black space-y-4">
             <div className="flex flex-col gap-2 font-mono text-sm">
-              <Link 
-                href="/dashboard" 
+              <Link
+                href="/dashboard"
                 className="hover:underline py-2"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 Dashboard
               </Link>
-              <Link 
-                href="/departments" 
+              <Link
+                href="/audit"
                 className="hover:underline py-2"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                Departments
+                Audit
               </Link>
-              <Link 
-                href="/certificates" 
-                className="hover:underline py-2"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Certificates
-              </Link>
-              {adminLink && (
-                <Link 
-                  href={adminLink.href} 
-                  className="hover:underline py-2"
-                  onClick={() => setMobileMenuOpen(false)}
-                >
-                  {adminLink.label}
-                </Link>
-              )}
             </div>
             <div className="pt-4 border-t border-gray-300">
               {!loading && user && (
-                <p className="font-mono text-sm text-gray-600 mb-3 break-all">
-                  {user.email}
-                </p>
+                <div className="mb-3">
+                  <p className="font-mono text-sm text-gray-600 break-all">
+                    {user.email}
+                  </p>
+                  {roleLabel && (
+                    <span className="inline-block font-mono text-xs border border-black px-2 py-0.5 mt-1">
+                      {roleLabel}
+                    </span>
+                  )}
+                </div>
               )}
               <Button variant="secondary" onClick={handleSignOut} className="w-full">
                 Sign Out

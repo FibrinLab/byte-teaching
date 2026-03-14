@@ -1,0 +1,100 @@
+'use client'
+
+import { useState } from 'react'
+import { Button } from './Button'
+import { releaseTeacherFeedback } from '@/app/actions/feedback'
+import type { TeacherInvitation } from '@/lib/types'
+
+interface ReleaseTeacherFeedbackPanelProps {
+  sessionId: string
+  invitations: TeacherInvitation[]
+  registeredTeacherCount: number
+}
+
+export function ReleaseTeacherFeedbackPanel({
+  sessionId,
+  invitations,
+  registeredTeacherCount,
+}: ReleaseTeacherFeedbackPanelProps) {
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{ sentCount: number; totalTeachers: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const acceptedInvitations = invitations.filter(i => i.status === 'ACCEPTED')
+  const totalTeachers = acceptedInvitations.length + registeredTeacherCount
+
+  async function handleRelease() {
+    setLoading(true)
+    setError(null)
+    setResult(null)
+
+    try {
+      const res = await releaseTeacherFeedback(sessionId)
+      setResult(res)
+    } catch (err: any) {
+      setError(err.message || 'Failed to release feedback')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (totalTeachers === 0) {
+    return (
+      <p className="font-mono text-sm text-gray-600">
+        No accepted teachers for this session. Invite and confirm teachers first.
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="font-mono text-sm text-gray-600">
+        Send each teacher a feedback summary email with their teaching certificate attached.
+        This will generate a <strong>Teacher</strong> certificate and email it along with the
+        session's feedback statistics and attendee comments.
+      </p>
+
+      <div className="font-mono text-sm">
+        <p>
+          <strong>{totalTeachers}</strong> teacher{totalTeachers !== 1 ? 's' : ''} will receive the email:
+        </p>
+        <ul className="mt-2 space-y-1 pl-4">
+          {acceptedInvitations.map(inv => (
+            <li key={inv.id} className="text-gray-700">
+              {inv.first_name} {inv.last_name} ({inv.email})
+            </li>
+          ))}
+          {registeredTeacherCount > 0 && (
+            <li className="text-gray-700">
+              + {registeredTeacherCount} registered teacher{registeredTeacherCount !== 1 ? 's' : ''}
+            </li>
+          )}
+        </ul>
+      </div>
+
+      {result && (
+        <div className="border border-black bg-green-50 p-3 font-mono text-sm">
+          ✓ Feedback and certificates sent to {result.sentCount} of {result.totalTeachers} teacher{result.totalTeachers !== 1 ? 's' : ''}.
+        </div>
+      )}
+
+      {error && (
+        <div className="border border-red-600 bg-red-50 p-3 font-mono text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      <Button
+        onClick={handleRelease}
+        disabled={loading || !!result}
+      >
+        {loading
+          ? 'Sending...'
+          : result
+            ? 'Sent ✓'
+            : `Release Feedback to ${totalTeachers} Teacher${totalTeachers !== 1 ? 's' : ''}`
+        }
+      </Button>
+    </div>
+  )
+}

@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Button } from './Button'
+import { Input } from './Input'
 import { Textarea } from './Textarea'
 import { submitFeedback } from '@/app/actions/feedback'
 
@@ -12,17 +12,23 @@ interface FeedbackFormProps {
 }
 
 export function FeedbackForm({ sessionId, sessionTitle }: FeedbackFormProps) {
-  const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
   const [rating, setRating] = useState<number | null>(null)
   const [comment, setComment] = useState('')
-  const [isAnonymous, setIsAnonymous] = useState(true)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    
+
+    if (!firstName.trim() || !lastName.trim() || !email.trim()) {
+      setError('Please fill in your name and email')
+      return
+    }
+
     if (!rating) {
       setError('Please select a rating')
       return
@@ -34,16 +40,18 @@ export function FeedbackForm({ sessionId, sessionTitle }: FeedbackFormProps) {
 
     try {
       await submitFeedback(sessionId, {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim(),
         rating,
         comment: comment.trim() || undefined,
-        isAnonymous,
       })
       setSuccess(true)
+      setFirstName('')
+      setLastName('')
+      setEmail('')
       setRating(null)
       setComment('')
-      setTimeout(() => {
-        setSuccess(false)
-      }, 5000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit feedback')
     } finally {
@@ -62,10 +70,43 @@ export function FeedbackForm({ sessionId, sessionTitle }: FeedbackFormProps) {
       {success && (
         <div className="p-4 border border-green-500 bg-green-50">
           <p className="font-mono text-sm text-green-800">
-            Thank you for your feedback! Your response has been recorded.
+            Thank you for your feedback! Your attendance has been recorded.
           </p>
         </div>
       )}
+
+      <p className="font-mono text-xs text-gray-500 italic">
+        Your feedback is completely anonymous — teachers will not see your name or email.
+        This information is only used to issue your attendance certificate.
+      </p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Input
+          label="First Name *"
+          type="text"
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+          placeholder="Enter your first name"
+          required
+        />
+        <Input
+          label="Last Name *"
+          type="text"
+          value={lastName}
+          onChange={(e) => setLastName(e.target.value)}
+          placeholder="Enter your last name"
+          required
+        />
+      </div>
+
+      <Input
+        label="Email *"
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Enter your email address"
+        required
+      />
 
       <div>
         <label className="block text-sm font-mono font-bold mb-3">
@@ -102,21 +143,8 @@ export function FeedbackForm({ sessionId, sessionTitle }: FeedbackFormProps) {
         placeholder="Share your thoughts about this session..."
       />
 
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          id="anonymous"
-          checked={isAnonymous}
-          onChange={(e) => setIsAnonymous(e.target.checked)}
-          className="w-4 h-4 border border-black"
-        />
-        <label htmlFor="anonymous" className="font-mono text-sm">
-          Submit anonymously (recommended)
-        </label>
-      </div>
-
       <div className="flex gap-4">
-        <Button type="submit" disabled={loading || !rating} className="w-full sm:w-auto">
+        <Button type="submit" disabled={loading || !rating || !firstName.trim() || !lastName.trim() || !email.trim()} className="w-full sm:w-auto">
           {loading ? 'Submitting...' : 'Submit Feedback'}
         </Button>
       </div>

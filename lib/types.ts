@@ -4,6 +4,8 @@ export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE'
 export type AttendanceMethod = 'SELF_CHECKIN' | 'MANUAL'
 export type CertificateRole = 'ATTENDEE' | 'TEACHER'
 export type UserRole = 'org_admin' | 'department_admin' | 'faculty' | 'trainee'
+export type EmailType = 'INVITATION' | 'REMINDER'
+export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED'
 
 export interface Department {
   id: string
@@ -76,6 +78,34 @@ export interface Attendance {
   locked: boolean
   locked_by: string | null
   locked_at: string | null
+  created_at: string
+}
+
+export interface TeacherEmail {
+  id: string
+  org_id: string
+  session_id: string
+  user_id: string
+  email_type: EmailType
+  recipient_email: string
+  sent_at: string
+  sent_by: string
+  resend_id: string | null
+  created_at: string
+}
+
+export interface TeacherInvitation {
+  id: string
+  org_id: string
+  session_id: string
+  email: string
+  first_name: string | null
+  last_name: string | null
+  invite_code: string
+  status: InvitationStatus
+  sent_by: string
+  sent_at: string
+  responded_at: string | null
   created_at: string
 }
 

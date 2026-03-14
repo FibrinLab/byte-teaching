@@ -1,12 +1,13 @@
 import { redirect } from 'next/navigation'
-import { getCurrentUser, getCurrentOrgId, getCurrentUserId } from '@/lib/auth'
+import { getCurrentUser, getCurrentOrgId } from '@/lib/auth'
 import { NavShell } from '@/components/NavShell'
-import { Card } from '@/components/Card'
 import { getSession, getSessionTeachers } from '@/app/actions/sessions'
 import { getDepartment } from '@/app/actions/departments'
 import { getDepartmentMemberUsers } from '@/app/actions/departments'
 import { getAttendance } from '@/app/actions/attendance'
 import { isDepartmentModerator } from '@/lib/auth'
+import { getTeacherEmailHistory } from '@/app/actions/emails'
+import { getSessionInvitations } from '@/app/actions/teacher-invitations'
 import Link from 'next/link'
 import { ManageSessionTabs } from '@/components/ManageSessionTabs'
 
@@ -16,7 +17,7 @@ export default async function ManageSessionPage({
   params: { id: string }
 }) {
   const user = await getCurrentUser()
-  
+
   if (!user) {
     redirect('/login')
   }
@@ -38,20 +39,8 @@ export default async function ManageSessionPage({
   const teachers = await getSessionTeachers(params.id)
   const departmentMembers = await getDepartmentMemberUsers(session.department_id)
   const attendance = await getAttendance(params.id)
-  const currentUserId = await getCurrentUserId()
-
-  const checkinOpenMins = session.checkin_open_mins_before || 15
-  const checkinCloseMins = session.checkin_close_mins_after || 45
-
-  const isCheckInWindow = () => {
-    const now = new Date()
-    const startTime = new Date(session.date_start)
-    const checkInStart = new Date(startTime.getTime() - checkinOpenMins * 60 * 1000)
-    const checkInEnd = new Date(startTime.getTime() + checkinCloseMins * 60 * 1000)
-    return now >= checkInStart && now <= checkInEnd
-  }
-
-  const hasCheckedIn = attendance.some(a => a.user_id === currentUserId && (a.status === 'PRESENT' || a.status === 'LATE'))
+  const emailHistory = await getTeacherEmailHistory(params.id)
+  const invitations = await getSessionInvitations(params.id)
 
   return (
     <div className="min-h-screen">
@@ -71,12 +60,8 @@ export default async function ManageSessionPage({
           teachers={teachers}
           departmentMembers={departmentMembers}
           attendance={attendance}
-          isAttendanceLocked={session.attendance_locked || false}
-          currentUserId={currentUserId}
-          hasCheckedIn={hasCheckedIn}
-          isCheckInWindow={isCheckInWindow()}
-          checkinOpenMins={checkinOpenMins}
-          checkinCloseMins={checkinCloseMins}
+          emailHistory={emailHistory}
+          invitations={invitations}
         />
       </div>
     </div>

@@ -5,10 +5,12 @@ import { getCurrentUserId, isSuperAdmin } from '@/lib/auth'
 export async function NavShell() {
   const userId = await getCurrentUserId()
   let adminLink: { href: string; label: string } | null = null
+  let roleLabel: string | null = null
 
   if (userId) {
     if (await isSuperAdmin()) {
       adminLink = { href: '/super-admin', label: 'Super Admin' }
+      roleLabel = 'Super Admin'
     } else {
       const supabase = await createSupabaseClient()
 
@@ -21,6 +23,7 @@ export async function NavShell() {
 
       if (orgAdmin) {
         adminLink = { href: '/admin', label: 'Admin' }
+        roleLabel = 'Org Admin'
       } else {
         const { data: deptAdmin } = await supabase
           .from('department_members')
@@ -31,10 +34,11 @@ export async function NavShell() {
 
         if (deptAdmin) {
           adminLink = { href: '/admin', label: 'Moderator' }
+          roleLabel = 'Moderator'
         }
       }
     }
   }
 
-  return <Nav adminLink={adminLink} />
+  return <Nav adminLink={adminLink} roleLabel={roleLabel} />
 }

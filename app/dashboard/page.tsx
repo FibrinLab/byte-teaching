@@ -48,7 +48,6 @@ export default async function DashboardPage() {
     const upcomingDeptSessions = departmentSessions
       .filter(s => s.status === 'PUBLISHED' && new Date(s.date_start) > new Date())
       .slice(0, 5)
-
     return (
       <div className="min-h-screen">
         <NavShell />
@@ -97,11 +96,17 @@ export default async function DashboardPage() {
                 >
                   Manage Sessions
                 </Link>
-                <Link 
-                  href="/certificates"
+                <Link
+                  href="/audit"
                   className="block px-4 py-2 border border-black bg-white text-black font-mono text-sm hover:bg-gray-50 text-center"
                 >
-                  My Certificates
+                  Audit & Governance
+                </Link>
+                <Link
+                  href={`/departments/${moderatedDept.id}/settings`}
+                  className="block px-4 py-2 border border-black bg-white text-black font-mono text-sm hover:bg-gray-50 text-center"
+                >
+                  Certificate Settings
                 </Link>
               </div>
             </Card>
@@ -172,11 +177,11 @@ export default async function DashboardPage() {
             >
               Admin Panel
             </Link>
-            <Link 
-              href="/certificates"
+            <Link
+              href="/audit"
               className="px-4 py-2 border border-black bg-white text-black font-mono text-sm hover:bg-gray-50"
             >
-              My Certificates
+              Audit & Governance
             </Link>
           </div>
         </Card>

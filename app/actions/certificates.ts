@@ -5,6 +5,7 @@ import { requireAuth, requireOrg, getCurrentUserId } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import type { CertificateRole } from '@/lib/types'
 import { generateCertificatePDF } from '@/lib/certificates/pdf'
+import { generateCertificateCode } from '@/lib/certificates/utils'
 
 export async function generateCertificate(
   sessionId: string,
@@ -204,11 +205,3 @@ export async function getCertificateByCode(code: string) {
   return data
 }
 
-function generateCertificateCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let code = ''
-  for (let i = 0; i < 8; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  return code
-}
