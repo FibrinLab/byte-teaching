@@ -6,6 +6,8 @@ export type CertificateRole = 'ATTENDEE' | 'TEACHER'
 export type UserRole = 'org_admin' | 'department_admin' | 'faculty' | 'trainee'
 export type EmailType = 'INVITATION' | 'REMINDER'
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED'
+export type OnboardingLinkType = 'invite' | 'magiclink'
+export type OnboardingRequestStatus = 'PENDING' | 'COMPLETED' | 'CANCELLED'
 
 export interface Department {
   id: string
@@ -22,6 +24,65 @@ export interface DepartmentMember {
   user_id: string
   role: UserRole
   created_at: string
+}
+
+export interface Profile {
+  user_id: string
+  email: string
+  first_name: string | null
+  last_name: string | null
+  full_name: string | null
+  email_verified_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DepartmentInviteLink {
+  id: string
+  org_id: string
+  department_id: string
+  invite_code: string
+  created_by: string | null
+  rotated_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface MemberOnboardingRequest {
+  id: string
+  org_id: string
+  department_id: string
+  invite_link_id: string
+  email: string
+  first_name: string
+  last_name: string
+  requested_role: UserRole
+  link_type: OnboardingLinkType
+  status: OnboardingRequestStatus
+  requested_user_id: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ManagedDepartmentInviteLink {
+  department_id: string
+  department_name: string
+  invite_code: string
+  invite_url: string
+  rotated_at: string | null
+}
+
+export interface ManagedOrgMember {
+  user_id: string
+  email: string
+  full_name: string | null
+  first_name: string | null
+  last_name: string | null
+  role: UserRole
+  joined_at: string
+  department_names: string[]
+  removable: boolean
 }
 
 export interface Session {

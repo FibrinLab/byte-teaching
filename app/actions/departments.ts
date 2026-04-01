@@ -1,7 +1,7 @@
 'use server'
 
 import { createSupabaseClient, createSupabaseServiceClient } from '@/lib/supabase/server'
-import { requireAuth, requireOrg, requireDepartmentModerator } from '@/lib/auth'
+import { getCurrentOrgId, requireAuth, requireOrg, requireDepartmentModerator } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 
 export async function createDepartment(name: string) {
@@ -28,8 +28,7 @@ export async function createDepartment(name: string) {
   return data
 }
 
-export async function getDepartments() {
-  const orgId = await requireOrg()
+export async function getDepartmentsForOrg(orgId: string) {
   const supabase = await createSupabaseClient()
 
   const { data, error } = await supabase
@@ -43,6 +42,11 @@ export async function getDepartments() {
   }
 
   return data || []
+}
+
+export async function getDepartments() {
+  const orgId = await requireOrg()
+  return getDepartmentsForOrg(orgId)
 }
 
 export async function getDepartment(id: string) {
@@ -134,14 +138,18 @@ export async function getDepartmentMemberUsers(departmentId: string) {
   return users
 }
 
-export async function getMyModeratedDepartments() {
+export async function getMyModeratedDepartments(orgId?: string) {
   const userId = await requireAuth()
+  const resolvedOrgId = orgId || await getCurrentOrgId()
+  if (!resolvedOrgId) return []
+
   const supabase = await createSupabaseClient()
 
   const { data, error } = await supabase
     .from('department_members')
     .select('departments:department_id (id, name)')
     .eq('user_id', userId)
+    .eq('org_id', resolvedOrgId)
     .eq('role', 'department_admin')
 
   if (error) {
@@ -152,13 +160,13 @@ export async function getMyModeratedDepartments() {
   return departments.flat() as { id: string; name: string }[]
 }
 
-export async function getMyModeratedDepartment() {
-  const departments = await getMyModeratedDepartments()
+export async function getMyModeratedDepartment(orgId?: string) {
+  const departments = await getMyModeratedDepartments(orgId)
   return departments.length > 0 ? departments[0] : null
 }
 
 export async function getDepartmentLeadSettings(departmentId: string) {
-  await requireAuth()
+  await requireDepartmentModerator(departmentId)
   const orgId = await requireOrg()
   const supabase = await createSupabaseClient()
 
@@ -197,6 +205,7 @@ export async function updateDepartmentLeadSettings(
   }
 
   revalidatePath('/dashboard')
+  revalidatePath('/settings')
   revalidatePath(`/departments/${departmentId}`)
 }
 

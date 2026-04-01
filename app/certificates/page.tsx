@@ -50,7 +50,7 @@ export default async function CertificatesPage() {
                         <strong>Date:</strong> {cert.sessions?.date_start ? new Date(cert.sessions.date_start).toLocaleDateString() : 'Unknown'}
                       </p>
                       <p>
-                        <strong>Issued:</strong> {new Date(cert.issued_at).toLocaleDateString()}
+                        <strong>Issued:</strong> {new Date(cert.issued_at).toLocaleDateString('en-GB')}
                       </p>
                       <p>
                         <strong>Certificate Code:</strong> {cert.certificate_code}

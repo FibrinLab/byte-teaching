@@ -48,7 +48,7 @@ export function AttendanceList({ sessionId, attendance, teachers }: AttendanceLi
             </p>
             {record.first_evidence_at && (
               <p className="font-mono text-xs text-gray-500">
-                First evidence: {new Date(record.first_evidence_at).toLocaleString()}
+                First evidence: {new Date(record.first_evidence_at).toLocaleString('en-GB')}
               </p>
             )}
           </div>

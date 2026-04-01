@@ -155,7 +155,7 @@ export function AttendanceTrackingPanel({ sessionId, attendance, isLocked = fals
                       Status: {record.status}
                       {record.primary_source && <> | Source: {record.primary_source}</>}
                       {record.first_evidence_at && (
-                        <> | First evidence: {new Date(record.first_evidence_at).toLocaleString()}</>
+                        <> | First evidence: {new Date(record.first_evidence_at).toLocaleString('en-GB')}</>
                       )}
                       {record.locked && <> | 🔒 Locked</>}
                     </p>
@@ -209,7 +209,7 @@ export function AttendanceTrackingPanel({ sessionId, attendance, isLocked = fals
                     <div className="space-y-1">
                       {evidence[record.user_id].map((ev, idx) => (
                         <div key={ev.id || idx} className="font-mono text-xs">
-                          <span className="font-bold">{ev.source}</span> at {new Date(ev.observed_at).toLocaleString()}
+                          <span className="font-bold">{ev.source}</span> at {new Date(ev.observed_at).toLocaleString('en-GB')}
                           {ev.metadata && Object.keys(ev.metadata).length > 0 && (
                             <span className="text-gray-600 ml-2">
                               ({JSON.stringify(ev.metadata)})

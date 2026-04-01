@@ -68,7 +68,7 @@ export function FeedbackListPanel({ sessionId }: FeedbackListPanelProps) {
                   ))}
                 </span>
                 <span className="font-mono text-xs text-gray-500">
-                  {new Date(entry.created_at).toLocaleString()}
+                  {new Date(entry.created_at).toLocaleString('en-GB')}
                 </span>
               </div>
             </div>

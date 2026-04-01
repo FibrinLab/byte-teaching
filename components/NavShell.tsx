@@ -33,7 +33,6 @@ export async function NavShell() {
           .maybeSingle()
 
         if (deptAdmin) {
-          adminLink = { href: '/admin', label: 'Moderator' }
           roleLabel = 'Moderator'
         }
       }

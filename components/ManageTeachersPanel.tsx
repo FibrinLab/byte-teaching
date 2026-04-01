@@ -194,9 +194,9 @@ export function ManageTeachersPanel({
                 )}
 
                 <p className="font-mono text-xs text-gray-500">
-                  Sent: {new Date(invitation.sent_at).toLocaleString()}
+                  Sent: {new Date(invitation.sent_at).toLocaleString('en-GB')}
                   {invitation.responded_at && (
-                    <> | Responded: {new Date(invitation.responded_at).toLocaleString()}</>
+                    <> | Responded: {new Date(invitation.responded_at).toLocaleString('en-GB')}</>
                   )}
                 </p>
 
@@ -244,10 +244,10 @@ export function ManageTeachersPanel({
 
                   <div className="font-mono text-xs text-gray-500 space-y-0.5">
                     {lastInvitation ? (
-                      <p>Invited: {new Date(lastInvitation.sent_at).toLocaleString()}</p>
+                      <p>Invited: {new Date(lastInvitation.sent_at).toLocaleString('en-GB')}</p>
                     ) : null}
                     {lastReminder ? (
-                      <p>Reminded: {new Date(lastReminder.sent_at).toLocaleString()}</p>
+                      <p>Reminded: {new Date(lastReminder.sent_at).toLocaleString('en-GB')}</p>
                     ) : null}
                     {!lastInvitation && !lastReminder && (
                       <p>No emails sent yet</p>

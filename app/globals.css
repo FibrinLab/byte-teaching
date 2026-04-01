@@ -6,15 +6,175 @@
   body {
     @apply bg-white text-black font-mono antialiased;
   }
-  
+
   /* Prevent horizontal scroll on mobile */
   html {
     overflow-x: hidden;
   }
-  
+
   /* Better text wrapping on mobile */
   * {
     word-wrap: break-word;
     overflow-wrap: break-word;
+  }
+}
+
+/* Schedule-X calendar overrides to match monospace design */
+.sx-calendar-wrapper {
+  min-height: clamp(620px, 68vh, 820px);
+}
+
+.sx-calendar-wrapper .sx__calendar {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  border: 1px solid black;
+  border-radius: 0;
+  min-height: 100%;
+  box-shadow: none;
+}
+
+.sx-calendar-wrapper .sx__calendar .sx__date-grid-day__header,
+.sx-calendar-wrapper .sx__calendar .sx__week-grid__day-name,
+.sx-calendar-wrapper .sx__calendar .sx__month-grid-day__header {
+  font-family: inherit;
+}
+
+.sx-calendar-wrapper .sx__calendar-header {
+  border-bottom: 1px solid black;
+  padding: 0.9rem 1rem;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sx-calendar-wrapper .sx__calendar-header-content {
+  gap: 0.75rem;
+}
+
+.sx-calendar-wrapper .sx__range-heading {
+  max-width: none;
+  font-size: clamp(1.35rem, 2vw, 2.2rem);
+  letter-spacing: -0.05em;
+}
+
+.sx-calendar-wrapper .sx__calendar .sx__event {
+  border-radius: 0;
+  font-family: inherit;
+}
+
+.sx-calendar-wrapper .sx__calendar .sx__forward-backward-navigation button,
+.sx-calendar-wrapper .sx__calendar .sx__view-selection button,
+.sx-calendar-wrapper .sx__calendar .sx__today-button,
+.sx-calendar-wrapper .sx__calendar .sx__date-input {
+  border-radius: 0;
+  font-family: inherit;
+}
+
+.sx-calendar-wrapper .sx__month-grid-week {
+  min-height: 7.1rem;
+}
+
+.sx-calendar-wrapper .sx__month-grid-day {
+  padding: 0.25rem 0 0.5rem;
+}
+
+.sx-calendar-wrapper .sx__month-grid-day__header {
+  align-items: flex-start;
+  padding: 0 0.45rem 0.35rem;
+}
+
+.sx-calendar-wrapper .sx__month-grid-day__header-day-name {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+.sx-calendar-wrapper .sx__month-grid-day__header-date {
+  width: 2rem;
+  height: 2rem;
+  margin-bottom: 0;
+  font-size: 0.95rem;
+}
+
+.sx-calendar-wrapper .sx__month-grid-day__events {
+  gap: 0.28rem;
+  padding: 0 0.4rem;
+}
+
+.sx-calendar-wrapper .sx__month-grid-cell {
+  height: auto;
+  min-height: 2rem;
+}
+
+.sx-calendar-wrapper .sx__month-grid-event {
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.42rem;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sx-calendar-wrapper .sx__month-grid-event-time {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1;
+  font-weight: 700;
+  opacity: 0.72;
+  flex-shrink: 0;
+}
+
+.sx-calendar-wrapper .sx__month-grid-event-title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.1;
+  font-size: 0.77rem;
+  font-weight: 700;
+}
+
+.sx-calendar-wrapper .sx__month-grid-day__events-more {
+  width: calc(100% - 0.8rem);
+  margin: 0.2rem 0.4rem 0;
+  border: 1px solid #d1d5db;
+  border-radius: 0.45rem;
+  background: #f3f4f6;
+  color: #374151;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 0.45rem 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .sx-calendar-wrapper {
+    min-height: 580px;
+  }
+
+  .sx-calendar-wrapper .sx__calendar-header {
+    padding: 0.85rem;
+  }
+
+  .sx-calendar-wrapper .sx__range-heading {
+    font-size: 1.4rem;
+  }
+
+  .sx-calendar-wrapper .sx__month-grid-week {
+    min-height: 5.6rem;
+  }
+
+  .sx-calendar-wrapper .sx__month-grid-day__header {
+    padding-inline: 0.35rem;
+  }
+
+  .sx-calendar-wrapper .sx__month-grid-day__events {
+    padding-inline: 0.3rem;
+  }
+
+  .sx-calendar-wrapper .sx__month-grid-event {
+    min-height: 1.8rem;
+    padding: 0.18rem 0.3rem;
+  }
+
+  .sx-calendar-wrapper .sx__month-grid-event-title {
+    font-size: 0.7rem;
   }
 }

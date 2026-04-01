@@ -88,7 +88,7 @@ export function ManageSessionTabs({
                 <div className="space-y-2 font-mono text-sm">
                   <p><strong>Title:</strong> {session.title}</p>
                   <p className="break-words">
-                    <strong>Date:</strong> <span className="block sm:inline">{new Date(session.date_start).toLocaleString()}</span> - <span className="block sm:inline">{new Date(session.date_end).toLocaleString()}</span>
+                    <strong>Date:</strong> <span className="block sm:inline">{new Date(session.date_start).toLocaleString('en-GB')}</span> - <span className="block sm:inline">{new Date(session.date_end).toLocaleString('en-GB')}</span>
                   </p>
                   <p><strong>Location:</strong> {session.location_type}</p>
                   {session.teams_meeting_url && (

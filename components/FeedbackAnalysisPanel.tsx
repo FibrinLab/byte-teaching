@@ -120,7 +120,7 @@ export function FeedbackAnalysisPanel({ sessionId }: FeedbackAnalysisPanelProps)
                     ))}
                   </div>
                   <span className="font-mono text-xs text-gray-600">
-                    {new Date(feedback.created_at).toLocaleDateString()}
+                    {new Date(feedback.created_at).toLocaleDateString('en-GB')}
                   </span>
                 </div>
                 <p className="font-mono text-sm">{feedback.comment}</p>

@@ -1,0 +1,120 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
+import { createSupabaseClient } from '@/lib/supabase/client'
+import { finalizeMemberOnboarding } from '@/app/actions/member-onboarding'
+import { Card } from '@/components/Card'
+import { Button } from '@/components/Button'
+
+export default function JoinCallbackPage() {
+  const searchParams = useSearchParams()
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function completeCallback() {
+      try {
+        const supabase = createSupabaseClient()
+        const code = searchParams.get('code')
+        const tokenHash = searchParams.get('token_hash')
+        const type = searchParams.get('type')
+        const requestId = searchParams.get('requestId')
+        const mode = searchParams.get('mode')
+        const next = searchParams.get('next') || '/dashboard'
+
+        if (code) {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+          if (exchangeError) {
+            throw exchangeError
+          }
+        } else if (tokenHash && type) {
+          const { error: verifyError } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: type as 'signup' | 'invite' | 'magiclink' | 'recovery' | 'email_change' | 'email',
+          })
+          if (verifyError) {
+            throw verifyError
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 300))
+
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser()
+
+        if (userError) {
+          throw userError
+        }
+
+        if (!user) {
+          throw new Error('No authenticated session was created')
+        }
+
+        if (requestId) {
+          await finalizeMemberOnboarding(requestId)
+          if (!cancelled) {
+            window.location.replace('/dashboard')
+          }
+          return
+        }
+
+        if (!cancelled) {
+          window.location.replace(mode === 'login' ? next : '/dashboard')
+        }
+      } catch (callbackError) {
+        if (!cancelled) {
+          setError(
+            callbackError instanceof Error
+              ? callbackError.message
+              : 'Failed to complete sign-in'
+          )
+        }
+      }
+    }
+
+    completeCallback()
+
+    return () => {
+      cancelled = true
+    }
+  }, [searchParams])
+
+  if (error) {
+    return (
+      <div className="min-h-screen px-4 py-8 sm:px-6">
+        <div className="mx-auto max-w-2xl">
+          <Card>
+            <h1 className="font-mono text-2xl font-bold">Authentication Failed</h1>
+            <p className="mt-3 font-mono text-sm text-gray-600">{error}</p>
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+              <Link href="/login">
+                <Button type="button">Go to Login</Button>
+              </Link>
+              <Link href="/dashboard" className="font-mono text-sm underline self-center">
+                Back to Dashboard
+              </Link>
+            </div>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-2xl">
+        <Card>
+          <h1 className="font-mono text-2xl font-bold">Completing Access</h1>
+          <p className="mt-3 font-mono text-sm text-gray-600">
+            Hold on while we finish signing you in and attach your membership.
+          </p>
+        </Card>
+      </div>
+    </div>
+  )
+}

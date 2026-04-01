@@ -169,3 +169,92 @@ export function buildInvitationEmailHtml(
     </div>
   `
 }
+
+interface DepartmentInviteEmailParams {
+  departmentName: string
+  organizationName: string
+  inviteUrl: string
+  firstName?: string | null
+}
+
+interface PasswordlessLoginEmailParams {
+  inviteUrl: string
+  firstName?: string | null
+}
+
+function buildMonospaceEmailShell(title: string, body: string) {
+  return `
+    <div style="font-family:monospace;max-width:600px;margin:0 auto;padding:20px;">
+      <h2 style="border-bottom:2px solid #000;padding-bottom:10px;">${title}</h2>
+      ${body}
+      <p style="font-size:12px;color:#666;margin-top:20px;border-top:1px solid #ccc;padding-top:10px;">
+        This email was sent via Byte Teaching.
+      </p>
+    </div>
+  `
+}
+
+export function buildDepartmentInviteActivationEmailHtml(
+  params: DepartmentInviteEmailParams
+) {
+  const greeting = params.firstName ? `Dear ${params.firstName},` : 'Hello,'
+
+  return buildMonospaceEmailShell(
+    'Activate Your Department Access',
+    `
+      <p style="margin:20px 0;">${greeting}</p>
+      <p style="margin:20px 0;">
+        You have been invited to join <strong>${params.departmentName}</strong> in
+        <strong>${params.organizationName}</strong>.
+      </p>
+      <p style="margin:20px 0;">
+        Click the link below to activate your access and finish joining the department.
+      </p>
+      <a href="${params.inviteUrl}" style="display:inline-block;background:#000;color:#fff;padding:12px 24px;text-decoration:none;font-family:monospace;font-size:14px;">
+        Activate Access
+      </a>
+    `
+  )
+}
+
+export function buildDepartmentJoinMagicLinkEmailHtml(
+  params: DepartmentInviteEmailParams
+) {
+  const greeting = params.firstName ? `Dear ${params.firstName},` : 'Hello,'
+
+  return buildMonospaceEmailShell(
+    'Confirm Department Join',
+    `
+      <p style="margin:20px 0;">${greeting}</p>
+      <p style="margin:20px 0;">
+        Use the secure sign-in link below to join <strong>${params.departmentName}</strong>
+        in <strong>${params.organizationName}</strong>.
+      </p>
+      <p style="margin:20px 0;">
+        If you currently belong to another organization, your access will move when you complete this sign-in.
+      </p>
+      <a href="${params.inviteUrl}" style="display:inline-block;background:#000;color:#fff;padding:12px 24px;text-decoration:none;font-family:monospace;font-size:14px;">
+        Join Department
+      </a>
+    `
+  )
+}
+
+export function buildPasswordlessLoginEmailHtml(
+  params: PasswordlessLoginEmailParams
+) {
+  const greeting = params.firstName ? `Dear ${params.firstName},` : 'Hello,'
+
+  return buildMonospaceEmailShell(
+    'Your Sign-In Link',
+    `
+      <p style="margin:20px 0;">${greeting}</p>
+      <p style="margin:20px 0;">
+        Click the link below to sign in to Byte Teaching.
+      </p>
+      <a href="${params.inviteUrl}" style="display:inline-block;background:#000;color:#fff;padding:12px 24px;text-decoration:none;font-family:monospace;font-size:14px;">
+        Sign In
+      </a>
+    `
+  )
+}

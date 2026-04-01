@@ -45,7 +45,7 @@ export function AuditPanel({ sessionId }: AuditPanelProps) {
       e.attendee_last_name || '',
       e.attendee_email || '',
       e.rating?.toString() || '',
-      new Date(e.created_at).toLocaleString(),
+      new Date(e.created_at).toLocaleString('en-GB'),
     ])
 
     const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n')
@@ -104,7 +104,7 @@ export function AuditPanel({ sessionId }: AuditPanelProps) {
                   </td>
                   <td className="py-2 pr-4">{entry.attendee_email}</td>
                   <td className="py-2 pr-4">{entry.rating}/5</td>
-                  <td className="py-2">{new Date(entry.created_at).toLocaleString()}</td>
+                  <td className="py-2">{new Date(entry.created_at).toLocaleString('en-GB')}</td>
                 </tr>
               ))}
             </tbody>

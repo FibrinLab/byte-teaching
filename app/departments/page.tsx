@@ -44,7 +44,7 @@ export default async function DepartmentsPage() {
               <Card key={dept.id}>
                 <h2 className="text-xl font-mono font-bold mb-2">{dept.name}</h2>
                 <p className="font-mono text-sm text-gray-600 mb-4">
-                  Created {new Date(dept.created_at).toLocaleDateString()}
+                  Created {new Date(dept.created_at).toLocaleDateString('en-GB')}
                 </p>
                 <Link
                   href={`/departments/${dept.id}/sessions`}

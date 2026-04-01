@@ -85,7 +85,7 @@ export function AuditCertificateTable({ certificates }: AuditCertificateTablePro
                     </a>
                   </td>
                   <td className="py-2 whitespace-nowrap text-gray-600">
-                    {new Date(cert.issuedAt).toLocaleDateString()}
+                    {new Date(cert.issuedAt).toLocaleDateString('en-GB')}
                   </td>
                 </tr>
               ))

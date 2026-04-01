@@ -65,7 +65,7 @@ export default async function DepartmentSessionsPage({
                     )}
                     <div className="flex flex-wrap gap-4 font-mono text-sm">
                       <span>
-                        {new Date(session.date_start).toLocaleString()}
+                        {new Date(session.date_start).toLocaleString('en-GB')}
                       </span>
                       <span className="text-gray-600">{session.location_type}</span>
                       <span className={`px-2 py-1 border ${

@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { createSupabaseClient } from '@/lib/supabase/client'
 import { Button } from './Button'
 import type { User } from '@supabase/supabase-js'
@@ -19,9 +19,22 @@ interface NavProps {
 
 export function Nav({ adminLink, roleLabel }: NavProps) {
   const router = useRouter()
+  const pathname = usePathname()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const navLinks = [
+    { href: '/dashboard', label: 'Dashboard' },
+    { href: '/audit', label: 'Audit' },
+    { href: '/settings', label: 'Settings' },
+    ...(adminLink ? [adminLink] : []),
+  ]
+
+  function getNavLinkClass(href: string) {
+    const isActive = pathname === href || pathname.startsWith(`${href}/`)
+    return isActive ? 'underline underline-offset-4' : 'hover:underline'
+  }
 
   useEffect(() => {
     async function fetchUser() {
@@ -69,13 +82,14 @@ export function Nav({ adminLink, roleLabel }: NavProps) {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-6">
             <div className="flex items-center gap-3 font-mono text-sm">
-              <Link href="/dashboard" className="hover:underline">
-                Dashboard
-              </Link>
-              <span className="text-gray-400">|</span>
-              <Link href="/audit" className="hover:underline">
-                Audit
-              </Link>
+              {navLinks.map((link, index) => (
+                <Fragment key={link.href}>
+                  {index > 0 ? <span className="text-gray-400">|</span> : null}
+                  <Link href={link.href} className={getNavLinkClass(link.href)}>
+                    {link.label}
+                  </Link>
+                </Fragment>
+              ))}
             </div>
             <div className="flex items-center gap-4 ml-4">
               {!loading && user && (
@@ -110,20 +124,16 @@ export function Nav({ adminLink, roleLabel }: NavProps) {
         {mobileMenuOpen && (
           <div className="md:hidden mt-4 pt-4 border-t border-black space-y-4">
             <div className="flex flex-col gap-2 font-mono text-sm">
-              <Link
-                href="/dashboard"
-                className="hover:underline py-2"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Dashboard
-              </Link>
-              <Link
-                href="/audit"
-                className="hover:underline py-2"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Audit
-              </Link>
+              {navLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={`${getNavLinkClass(link.href)} py-2`}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  {link.label}
+                </Link>
+              ))}
             </div>
             <div className="pt-4 border-t border-gray-300">
               {!loading && user && (

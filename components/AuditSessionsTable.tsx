@@ -42,7 +42,7 @@ export function AuditSessionsTable({ sessions }: AuditSessionsTableProps) {
                 </span>
               </td>
               <td className="py-2 pr-4 whitespace-nowrap text-gray-600">
-                {new Date(session.dateStart).toLocaleDateString()}
+                {new Date(session.dateStart).toLocaleDateString('en-GB')}
               </td>
               <td className="py-2 pr-4 whitespace-nowrap">
                 <span className="font-bold">{session.attendancePresent}</span>

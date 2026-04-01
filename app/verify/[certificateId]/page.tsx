@@ -24,9 +24,9 @@ export default async function VerifyCertificatePage({
                   <p><strong>Session:</strong> {certificate.sessions?.title || 'Unknown'}</p>
                   <p><strong>Department:</strong> {certificate.departments?.name || 'Unknown'}</p>
                   <p><strong>Role:</strong> {certificate.certificate_role}</p>
-                  <p><strong>Issued:</strong> {new Date(certificate.issued_at).toLocaleDateString()}</p>
+                  <p><strong>Issued:</strong> {new Date(certificate.issued_at).toLocaleDateString('en-GB')}</p>
                   {certificate.sessions?.date_start && (
-                    <p><strong>Session Date:</strong> {new Date(certificate.sessions.date_start).toLocaleDateString()}</p>
+                    <p><strong>Session Date:</strong> {new Date(certificate.sessions.date_start).toLocaleDateString('en-GB')}</p>
                   )}
                 </div>
               </div>
