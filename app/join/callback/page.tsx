@@ -11,6 +11,8 @@ import { Button } from '@/components/Button'
 export default function JoinCallbackPage() {
   const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
+  const mode = searchParams.get('mode')
+  const loginHref = mode === 'login' ? '/trainee-login' : '/login'
 
   useEffect(() => {
     let cancelled = false
@@ -92,8 +94,10 @@ export default function JoinCallbackPage() {
             <h1 className="font-mono text-2xl font-bold">Authentication Failed</h1>
             <p className="mt-3 font-mono text-sm text-gray-600">{error}</p>
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-              <Link href="/login">
-                <Button type="button">Go to Login</Button>
+              <Link href={loginHref}>
+                <Button type="button">
+                  {mode === 'login' ? 'Go to Trainee Sign-In' : 'Go to Login'}
+                </Button>
               </Link>
               <Link href="/dashboard" className="font-mono text-sm underline self-center">
                 Back to Dashboard

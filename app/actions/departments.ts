@@ -1,132 +1,83 @@
 'use server'
 
-import { createSupabaseClient, createSupabaseServiceClient } from '@/lib/supabase/server'
-import { getCurrentOrgId, requireAuth, requireOrg, requireDepartmentModerator } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
+import {
+  getCurrentOrgId,
+  requireAuth,
+  requireOrg,
+  requireDepartmentModerator,
+} from '@/lib/auth'
+import { normalizeDepartmentFeedbackFields } from '@/lib/feedback-form'
+import { createSupabaseServiceClient } from '@/lib/supabase/server'
+import * as departmentsDb from '@/lib/db/departments'
+import { DbNotFoundError } from '@/lib/db'
+import type { UserRole } from '@/lib/types'
 
 export async function createDepartment(name: string) {
   const userId = await requireAuth()
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  const { data, error } = await supabase
-    .from('departments')
-    .insert({
-      org_id: orgId,
-      name,
-      created_by: userId,
-    })
-    .select()
-    .single()
-
-  if (error) {
-    throw new Error(`Failed to create department: ${error.message}`)
-  }
+  const department = await departmentsDb.insertDepartment({
+    orgId,
+    name,
+    createdBy: userId,
+  })
 
   revalidatePath('/departments')
   revalidatePath('/admin')
-  return data
+  return department
 }
 
 export async function getDepartmentsForOrg(orgId: string) {
-  const supabase = await createSupabaseClient()
-
-  const { data, error } = await supabase
-    .from('departments')
-    .select('*')
-    .eq('org_id', orgId)
-    .order('name')
-
-  if (error) {
-    throw new Error(`Failed to fetch departments: ${error.message}`)
-  }
-
-  return data || []
+  return departmentsDb.listDepartmentsByOrg(orgId)
 }
 
 export async function getDepartments() {
   const orgId = await requireOrg()
-  return getDepartmentsForOrg(orgId)
+  return departmentsDb.listDepartmentsByOrg(orgId)
 }
 
 export async function getDepartment(id: string) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
-
-  const { data, error } = await supabase
-    .from('departments')
-    .select('*')
-    .eq('id', id)
-    .eq('org_id', orgId)
-    .single()
-
-  if (error) {
-    throw new Error(`Failed to fetch department: ${error.message}`)
-  }
-
-  return data
+  return departmentsDb.getDepartmentOrThrow(id, orgId)
 }
 
-export async function addDepartmentMember(departmentId: string, userId: string, role: string) {
+export async function addDepartmentMember(
+  departmentId: string,
+  userId: string,
+  role: string
+) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  const { data, error } = await supabase
-    .from('department_members')
-    .insert({
-      org_id: orgId,
-      department_id: departmentId,
-      user_id: userId,
-      role,
-    })
-    .select()
-    .single()
-
-  if (error) {
-    throw new Error(`Failed to add member: ${error.message}`)
-  }
+  const member = await departmentsDb.insertDepartmentMember({
+    orgId,
+    departmentId,
+    userId,
+    role: role as UserRole,
+  })
 
   revalidatePath(`/departments/${departmentId}`)
   revalidatePath('/admin')
-  return data
+  return member
 }
 
 export async function getDepartmentMembers(departmentId: string) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
-
-  const { data, error } = await supabase
-    .from('department_members')
-    .select('*')
-    .eq('org_id', orgId)
-    .eq('department_id', departmentId)
-
-  if (error) {
-    throw new Error(`Failed to fetch members: ${error.message}`)
-  }
-
-  return data || []
+  return departmentsDb.listDepartmentMembers(orgId, departmentId)
 }
 
 export async function getDepartmentMemberUsers(departmentId: string) {
   await requireDepartmentModerator(departmentId)
 
-  const supabase = await createSupabaseServiceClient()
-
-  const { data: members, error: membersError } = await supabase
-    .from('department_members')
-    .select('user_id')
-    .eq('department_id', departmentId)
-
-  if (membersError) {
-    throw new Error(`Failed to fetch department members: ${membersError.message}`)
-  }
-
-  const userIds = (members || []).map(m => m.user_id)
+  const userIds = await departmentsDb.listDepartmentMemberUserIds(departmentId)
   if (userIds.length === 0) return []
 
+  // Fetching user emails is an auth-plane concern (GoTrue admin API),
+  // not a data-plane one, so it stays on a direct Supabase client until
+  // the auth provider itself is swapped out.
+  const supabase = await createSupabaseServiceClient()
   const users = await Promise.all(
-    userIds.map(async userId => {
+    userIds.map(async (userId) => {
       const { data, error } = await supabase.auth.admin.getUserById(userId)
       if (error) {
         return { id: userId, email: null }
@@ -140,48 +91,29 @@ export async function getDepartmentMemberUsers(departmentId: string) {
 
 export async function getMyModeratedDepartments(orgId?: string) {
   const userId = await requireAuth()
-  const resolvedOrgId = orgId || await getCurrentOrgId()
+  const resolvedOrgId = orgId || (await getCurrentOrgId())
   if (!resolvedOrgId) return []
-
-  const supabase = await createSupabaseClient()
-
-  const { data, error } = await supabase
-    .from('department_members')
-    .select('departments:department_id (id, name)')
-    .eq('user_id', userId)
-    .eq('org_id', resolvedOrgId)
-    .eq('role', 'department_admin')
-
-  if (error) {
-    throw new Error(`Failed to fetch moderated departments: ${error.message}`)
-  }
-
-  const departments = (data || []).map(row => row.departments).filter(Boolean)
-  return departments.flat() as { id: string; name: string }[]
+  return departmentsDb.listModeratedDepartments(userId, resolvedOrgId)
 }
 
 export async function getMyModeratedDepartment(orgId?: string) {
   const departments = await getMyModeratedDepartments(orgId)
-  return departments.length > 0 ? departments[0] : null
+  return departments[0] ?? null
 }
 
 export async function getDepartmentLeadSettings(departmentId: string) {
   await requireDepartmentModerator(departmentId)
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  const { data, error } = await supabase
-    .from('departments')
-    .select('lead_name')
-    .eq('id', departmentId)
-    .eq('org_id', orgId)
-    .single()
-
-  if (error) {
-    throw new Error(`Failed to fetch department settings: ${error.message}`)
+  const settings = await departmentsDb.findDepartmentSettings(departmentId, orgId)
+  if (!settings) {
+    throw new DbNotFoundError(`Department ${departmentId} not found`)
   }
 
-  return { leadName: data.lead_name || '' }
+  return {
+    leadName: settings.leadName || '',
+    feedbackFormFields: normalizeDepartmentFeedbackFields(settings.feedbackFormFields),
+  }
 }
 
 export async function updateDepartmentLeadSettings(
@@ -190,19 +122,12 @@ export async function updateDepartmentLeadSettings(
 ) {
   await requireDepartmentModerator(departmentId)
   const orgId = await requireOrg()
-  const supabase = await createSupabaseServiceClient()
 
-  const { error } = await supabase
-    .from('departments')
-    .update({
-      lead_name: leadName.trim() || null,
-    })
-    .eq('id', departmentId)
-    .eq('org_id', orgId)
-
-  if (error) {
-    throw new Error(`Failed to update department settings: ${error.message}`)
-  }
+  await departmentsDb.updateDepartmentLeadName(
+    departmentId,
+    orgId,
+    leadName.trim() || null
+  )
 
   revalidatePath('/dashboard')
   revalidatePath('/settings')
@@ -211,37 +136,14 @@ export async function updateDepartmentLeadSettings(
 
 export async function leaveDepartment(departmentId: string) {
   const userId = await requireAuth()
-  const supabase = await createSupabaseServiceClient()
 
-  const { data: department, error: deptError } = await supabase
-    .from('departments')
-    .select('org_id')
-    .eq('id', departmentId)
-    .single()
-
-  if (deptError || !department) {
-    throw new Error('Department not found')
+  const orgId = await departmentsDb.findDepartmentOrgId(departmentId)
+  if (!orgId) {
+    throw new DbNotFoundError('Department not found')
   }
 
-  const { error: removeDeptError } = await supabase
-    .from('department_members')
-    .delete()
-    .eq('department_id', departmentId)
-    .eq('user_id', userId)
-
-  if (removeDeptError) {
-    throw new Error(`Failed to leave department: ${removeDeptError.message}`)
-  }
-
-  const { error: removeOrgError } = await supabase
-    .from('organization_members')
-    .delete()
-    .eq('org_id', department.org_id)
-    .eq('user_id', userId)
-
-  if (removeOrgError) {
-    throw new Error(`Failed to leave organization: ${removeOrgError.message}`)
-  }
+  await departmentsDb.deleteDepartmentMember(departmentId, userId)
+  await departmentsDb.deleteOrgMember(orgId, userId)
 
   revalidatePath('/dashboard')
   revalidatePath('/departments')
@@ -249,39 +151,19 @@ export async function leaveDepartment(departmentId: string) {
   return { success: true }
 }
 
-export async function removeDepartmentMember(departmentId: string, memberUserId: string) {
+export async function removeDepartmentMember(
+  departmentId: string,
+  memberUserId: string
+) {
   await requireDepartmentModerator(departmentId)
-  const supabase = await createSupabaseServiceClient()
 
-  const { data: department, error: deptError } = await supabase
-    .from('departments')
-    .select('org_id')
-    .eq('id', departmentId)
-    .single()
-
-  if (deptError || !department) {
-    throw new Error('Department not found')
+  const orgId = await departmentsDb.findDepartmentOrgId(departmentId)
+  if (!orgId) {
+    throw new DbNotFoundError('Department not found')
   }
 
-  const { error: removeDeptError } = await supabase
-    .from('department_members')
-    .delete()
-    .eq('department_id', departmentId)
-    .eq('user_id', memberUserId)
-
-  if (removeDeptError) {
-    throw new Error(`Failed to remove member: ${removeDeptError.message}`)
-  }
-
-  const { error: removeOrgError } = await supabase
-    .from('organization_members')
-    .delete()
-    .eq('org_id', department.org_id)
-    .eq('user_id', memberUserId)
-
-  if (removeOrgError) {
-    throw new Error(`Failed to remove organization member: ${removeOrgError.message}`)
-  }
+  await departmentsDb.deleteDepartmentMember(departmentId, memberUserId)
+  await departmentsDb.deleteOrgMember(orgId, memberUserId)
 
   revalidatePath(`/departments/${departmentId}`)
   revalidatePath('/admin')

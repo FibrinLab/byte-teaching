@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createSupabaseClient } from '@/lib/supabase/server'
 import { requireAuth, requireOrg, getCurrentUser } from '@/lib/auth'
 import { generateCertificatePDF } from '@/lib/certificates/pdf'
+import * as certificatesDb from '@/lib/db/certificates'
 
 export async function GET(
   request: NextRequest,
@@ -10,49 +10,28 @@ export async function GET(
   try {
     const userId = await requireAuth()
     const orgId = await requireOrg()
-    const supabase = await createSupabaseClient()
     const user = await getCurrentUser()
 
-    // Get certificate
-    const { data: certificate, error: certError } = await supabase
-      .from('certificates')
-      .select(`
-        *,
-        sessions:session_id (id, title, date_start),
-        departments:department_id (id, name),
-        organizations:org_id (id, name)
-      `)
-      .eq('id', params.id)
-      .eq('org_id', orgId)
-      .single()
+    const certificate = await certificatesDb.findCertificateForDownload(params.id, orgId)
 
-    if (certError || !certificate) {
-      return NextResponse.json(
-        { error: 'Certificate not found' },
-        { status: 404 }
-      )
+    if (!certificate) {
+      return NextResponse.json({ error: 'Certificate not found' }, { status: 404 })
     }
 
-    // Verify user owns this certificate
     if (certificate.user_id !== userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 403 }
-      )
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 
-    // Get org name
-    const orgName = (certificate.organizations as any)?.name || 'Organization'
+    const orgName = certificate.organizations?.name || 'Organization'
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin
     const verifyUrl = `${baseUrl}/verify/${certificate.certificate_code}`
 
-    // Generate PDF
     const pdfBuffer = await generateCertificatePDF({
       orgName,
-      departmentName: (certificate.departments as any)?.name || 'Unknown',
-      sessionTitle: (certificate.sessions as any)?.title || 'Unknown',
-      sessionDate: (certificate.sessions as any)?.date_start
-        ? new Date((certificate.sessions as any).date_start).toLocaleDateString()
+      departmentName: certificate.departments?.name || 'Unknown',
+      sessionTitle: certificate.sessions?.title || 'Unknown',
+      sessionDate: certificate.sessions?.date_start
+        ? new Date(certificate.sessions.date_start).toLocaleDateString()
         : 'Unknown',
       recipientName: user?.email || certificate.user_id,
       role: certificate.certificate_role === 'ATTENDEE' ? 'Attendee' : 'Teacher',
@@ -61,7 +40,7 @@ export async function GET(
       verifyUrl,
     })
 
-    return new NextResponse(pdfBuffer as any, {
+    return new NextResponse(pdfBuffer as unknown as BodyInit, {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="certificate-${certificate.certificate_code}.pdf"`,
@@ -69,7 +48,9 @@ export async function GET(
     })
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to generate certificate' },
+      {
+        error: error instanceof Error ? error.message : 'Failed to generate certificate',
+      },
       { status: 500 }
     )
   }

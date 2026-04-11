@@ -157,7 +157,7 @@ export function ManageTeachersPanel({
       {/* Invite by Email */}
       <div>
         <h3 className="font-mono font-bold mb-2">Invite Teacher</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             type="email"
             value={inviteEmail}
@@ -169,6 +169,7 @@ export function ManageTeachersPanel({
             type="button"
             onClick={handleInvite}
             disabled={!inviteEmail.trim() || loading === 'invite'}
+            className="w-full sm:w-auto"
           >
             {loading === 'invite' ? 'Sending...' : 'Send Invitation'}
           </Button>

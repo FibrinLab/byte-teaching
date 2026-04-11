@@ -1,0 +1,209 @@
+import type { Certificate, CertificateRole } from '@/lib/types'
+import { getDb } from './client'
+import { toDbError } from './errors'
+
+// Shapes for reads that embed session / department joins. Kept local so the
+// DAL owns the contract rather than leaking Supabase's join syntax upward.
+export interface CertificateWithSession extends Certificate {
+  sessions: {
+    id: string
+    title: string
+    date_start: string
+    description?: string | null
+  } | null
+  departments: {
+    id: string
+    name: string
+  } | null
+}
+
+// -----------------------------------------------------------------------------
+// Certificate rows
+// -----------------------------------------------------------------------------
+
+export async function insertCertificate(input: {
+  orgId: string
+  departmentId: string
+  sessionId: string
+  userId: string | null
+  role: CertificateRole
+  certificateCode: string
+  recipientName?: string
+}): Promise<Certificate> {
+  const db = await getDb()
+
+  const row: Record<string, unknown> = {
+    org_id: input.orgId,
+    department_id: input.departmentId,
+    session_id: input.sessionId,
+    user_id: input.userId,
+    certificate_role: input.role,
+    certificate_code: input.certificateCode,
+  }
+  if (input.recipientName !== undefined) {
+    row.recipient_name = input.recipientName
+  }
+
+  const { data, error } = await db
+    .from('certificates')
+    .insert(row)
+    .select()
+    .single()
+
+  if (error) throw toDbError('Failed to create certificate', error)
+  return data as Certificate
+}
+
+export async function listMyCertificates(
+  orgId: string,
+  userId: string
+): Promise<CertificateWithSession[]> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('certificates')
+    .select(
+      `*,
+       sessions:session_id (id, title, date_start),
+       departments:department_id (id, name)`
+    )
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .order('issued_at', { ascending: false })
+
+  if (error) throw toDbError('Failed to list certificates', error)
+  return (data as CertificateWithSession[] | null) ?? []
+}
+
+export interface CertificateForDownload extends Certificate {
+  sessions: { id: string; title: string; date_start: string } | null
+  departments: { id: string; name: string } | null
+  organizations: { id: string; name: string } | null
+}
+
+/**
+ * Full certificate row with org/department/session joins, scoped to the
+ * caller's org. Used by the certificate download route to render the PDF.
+ */
+export async function findCertificateForDownload(
+  id: string,
+  orgId: string
+): Promise<CertificateForDownload | null> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('certificates')
+    .select(
+      `*,
+       sessions:session_id (id, title, date_start),
+       departments:department_id (id, name),
+       organizations:org_id (id, name)`
+    )
+    .eq('id', id)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to fetch certificate for download', error)
+  return (data as CertificateForDownload | null) ?? null
+}
+
+export async function findCertificateByCode(
+  code: string
+): Promise<CertificateWithSession | null> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('certificates')
+    .select(
+      `*,
+       sessions:session_id (id, title, date_start, description),
+       departments:department_id (id, name)`
+    )
+    .eq('certificate_code', code)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to fetch certificate', error)
+  return (data as CertificateWithSession | null) ?? null
+}
+
+// -----------------------------------------------------------------------------
+// Helpers for certificate-generation flows
+// -----------------------------------------------------------------------------
+
+export interface SessionWithCertificateContext {
+  id: string
+  org_id: string
+  department_id: string
+  title: string
+  date_start: string
+  date_end: string
+  status: string
+  require_feedback_for_certificate?: boolean
+  departments: { id: string; name: string } | null
+  organizations: { id: string; name: string } | null
+}
+
+/**
+ * Fetch a session with the department + org names needed to render a
+ * certificate. Read-only; the caller is responsible for authorization.
+ */
+export async function findSessionForCertificate(
+  sessionId: string,
+  orgId: string
+): Promise<SessionWithCertificateContext | null> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('sessions')
+    .select(
+      `*,
+       departments:department_id (id, name),
+       organizations:org_id (id, name)`
+    )
+    .eq('id', sessionId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to fetch session for certificate', error)
+  return (data as SessionWithCertificateContext | null) ?? null
+}
+
+export async function listSessionTeacherIds(sessionId: string): Promise<string[]> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('session_teachers')
+    .select('user_id')
+    .eq('session_id', sessionId)
+
+  if (error) throw toDbError('Failed to list session teachers', error)
+  return ((data as { user_id: string }[] | null) ?? []).map((r) => r.user_id)
+}
+
+export async function listSessionAttendeeUserIds(
+  sessionId: string,
+  statuses: ('PRESENT' | 'LATE')[] = ['PRESENT', 'LATE']
+): Promise<string[]> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('attendance')
+    .select('user_id')
+    .eq('session_id', sessionId)
+    .in('status', statuses)
+
+  if (error) throw toDbError('Failed to list session attendees', error)
+  return ((data as { user_id: string | null }[] | null) ?? [])
+    .map((r) => r.user_id)
+    .filter((id): id is string => !!id)
+}
+
+export async function hasUserSubmittedFeedback(
+  sessionId: string,
+  userId: string
+): Promise<boolean> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('session_feedback')
+    .select('id')
+    .eq('session_id', sessionId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to check feedback', error)
+  return !!data
+}

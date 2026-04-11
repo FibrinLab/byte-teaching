@@ -1,10 +1,21 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Card } from './Card'
 
-interface FeedbackAnalysisPanelProps {
-  sessionId: string
+interface FeedbackQuestionSummary {
+  fieldId: string
+  label: string
+  averageRating: number
+  responseCount: number
+  commentsCount: number
+}
+
+interface FeedbackCommentEntry {
+  id: string
+  rating: number | null
+  created_at: string
+  responses: { label: string; text: string }[]
 }
 
 interface FeedbackStats {
@@ -12,7 +23,12 @@ interface FeedbackStats {
   averageRating: number
   ratingDistribution: { [key: number]: number }
   commentsCount: number
-  comments: any[]
+  comments: FeedbackCommentEntry[]
+  questionSummaries: FeedbackQuestionSummary[]
+}
+
+interface FeedbackAnalysisPanelProps {
+  sessionId: string
 }
 
 export function FeedbackAnalysisPanel({ sessionId }: FeedbackAnalysisPanelProps) {
@@ -36,6 +52,7 @@ export function FeedbackAnalysisPanel({ sessionId }: FeedbackAnalysisPanelProps)
         setLoading(false)
       }
     }
+
     loadStats()
   }, [sessionId])
 
@@ -55,80 +72,105 @@ export function FeedbackAnalysisPanel({ sessionId }: FeedbackAnalysisPanelProps)
     return (
       <div>
         <p className="font-mono text-sm text-gray-600 mb-4">No feedback received yet.</p>
-        <p className="font-mono text-sm">Share the feedback link or QR code with attendees to collect feedback.</p>
+        <p className="font-mono text-sm">
+          Share the feedback link or QR code with attendees to collect feedback.
+        </p>
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card>
-          <p className="font-mono text-sm text-gray-600 mb-1">Total Responses</p>
+          <p className="mb-1 font-mono text-sm text-gray-600">Total Responses</p>
           <p className="text-3xl font-mono font-bold">{stats.total}</p>
         </Card>
         <Card>
-          <p className="font-mono text-sm text-gray-600 mb-1">Average Rating</p>
+          <p className="mb-1 font-mono text-sm text-gray-600">Average Score</p>
           <p className="text-3xl font-mono font-bold">{stats.averageRating.toFixed(1)}</p>
-          <p className="font-mono text-xs text-gray-600 mt-1">out of 5.0</p>
+          <p className="mt-1 font-mono text-xs text-gray-600">derived from scored questions</p>
         </Card>
         <Card>
-          <p className="font-mono text-sm text-gray-600 mb-1">Comments</p>
+          <p className="mb-1 font-mono text-sm text-gray-600">Text Responses</p>
           <p className="text-3xl font-mono font-bold">{stats.commentsCount}</p>
         </Card>
       </div>
 
       <Card>
-        <h3 className="font-mono font-bold mb-4">Rating Distribution</h3>
+        <h3 className="mb-4 font-mono font-bold">Overall Score Distribution</h3>
         <div className="space-y-3">
-          {[5, 4, 3, 2, 1].map(rating => {
+          {[5, 4, 3, 2, 1].map((rating) => {
             const count = stats.ratingDistribution[rating] || 0
             const percentage = stats.total > 0 ? (count / stats.total) * 100 : 0
             return (
               <div key={rating} className="flex items-center gap-3">
-                <span className="font-mono text-sm font-bold w-8">{rating}</span>
-                <div className="flex-1 bg-gray-200 h-6 relative">
-                  <div
-                    className="bg-black h-full"
-                    style={{ width: `${percentage}%` }}
-                  />
+                <span className="w-8 font-mono text-sm font-bold">{rating}</span>
+                <div className="relative h-6 flex-1 bg-gray-200">
+                  <div className="h-full bg-black" style={{ width: `${percentage}%` }} />
                 </div>
-                <span className="font-mono text-sm w-12 text-right">{count}</span>
+                <span className="w-12 text-right font-mono text-sm">{count}</span>
               </div>
             )
           })}
         </div>
       </Card>
 
-      {stats.comments.length > 0 && (
+      {stats.questionSummaries.length > 0 ? (
         <Card>
-          <h3 className="font-mono font-bold mb-4">Comments</h3>
+          <h3 className="mb-4 font-mono font-bold">RCPCH Question Summary</h3>
           <div className="space-y-4">
-            {stats.comments.map((feedback: any, index: number) => (
-              <div key={feedback.id || index} className="p-3 border border-gray-300">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex gap-2">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <span
-                        key={i}
-                        className={`font-mono text-sm ${
-                          i < feedback.rating ? 'text-black' : 'text-gray-300'
-                        }`}
-                      >
-                        ★
-                      </span>
-                    ))}
+            {stats.questionSummaries.map((question) => (
+              <div key={question.fieldId} className="border border-gray-300 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="font-mono text-sm font-bold leading-6">{question.label}</p>
+                    <p className="mt-2 font-mono text-xs uppercase tracking-[0.18em] text-gray-500">
+                      {question.responseCount} scored response
+                      {question.responseCount !== 1 ? 's' : ''}
+                      {question.commentsCount > 0
+                        ? ` · ${question.commentsCount} follow-up comment${question.commentsCount !== 1 ? 's' : ''}`
+                        : ''}
+                    </p>
                   </div>
-                  <span className="font-mono text-xs text-gray-600">
-                    {new Date(feedback.created_at).toLocaleDateString('en-GB')}
-                  </span>
+                  <p className="font-mono text-2xl font-bold">{question.averageRating.toFixed(1)}/5</p>
                 </div>
-                <p className="font-mono text-sm">{feedback.comment}</p>
               </div>
             ))}
           </div>
         </Card>
-      )}
+      ) : null}
+
+      {stats.comments.length > 0 ? (
+        <Card>
+          <h3 className="mb-4 font-mono font-bold">Written Feedback</h3>
+          <div className="space-y-4">
+            {stats.comments.map((entry) => (
+              <div key={entry.id} className="border border-gray-300 p-4">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="font-mono text-xs uppercase tracking-[0.18em] text-gray-500">
+                    {new Date(entry.created_at).toLocaleDateString('en-GB')}
+                  </p>
+                  {entry.rating !== null ? (
+                    <p className="font-mono text-sm font-bold">{entry.rating.toFixed(1)}/5 overall</p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-3">
+                  {entry.responses.map((response, index) => (
+                    <div key={`${entry.id}-${index}`} className="border-l-2 border-black pl-3">
+                      <p className="font-mono text-xs uppercase tracking-[0.18em] text-gray-500">
+                        {response.label}
+                      </p>
+                      <p className="mt-2 font-mono text-sm leading-6">{response.text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
     </div>
   )
 }

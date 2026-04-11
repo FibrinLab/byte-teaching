@@ -1,14 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { formatFeedbackAnswerValue } from '@/lib/feedback-form'
+import type { SubmittedFeedbackAnswer } from '@/lib/types'
 
 interface FeedbackEntry {
   id: string
   attendee_first_name: string | null
   attendee_last_name: string | null
   attendee_email: string | null
-  rating: number
+  rating: number | null
   comment: string | null
+  answers: SubmittedFeedbackAnswer[]
   created_at: string
 }
 
@@ -24,9 +27,12 @@ export function FeedbackListPanel({ sessionId }: FeedbackListPanelProps) {
   useEffect(() => {
     async function fetchFeedback() {
       try {
-        const res = await fetch(`/api/sessions/${sessionId}/feedback/audit`)
-        if (!res.ok) throw new Error('Failed to fetch feedback')
-        const data = await res.json()
+        const response = await fetch(`/api/sessions/${sessionId}/feedback/audit`)
+        if (!response.ok) {
+          throw new Error('Failed to fetch feedback')
+        }
+
+        const data = await response.json()
         setEntries(data)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load feedback')
@@ -34,6 +40,7 @@ export function FeedbackListPanel({ sessionId }: FeedbackListPanelProps) {
         setLoading(false)
       }
     }
+
     fetchFeedback()
   }, [sessionId])
 
@@ -51,32 +58,53 @@ export function FeedbackListPanel({ sessionId }: FeedbackListPanelProps) {
 
   return (
     <div className="space-y-3">
-      <p className="font-mono text-xs text-gray-500">{entries.length} response{entries.length !== 1 ? 's' : ''}</p>
+      <p className="font-mono text-xs text-gray-500">
+        {entries.length} response{entries.length !== 1 ? 's' : ''}
+      </p>
       <ul className="space-y-3">
-        {entries.map((entry) => (
-          <li key={entry.id} className="border border-gray-300 p-3 space-y-1">
-            <div className="flex items-center justify-between flex-wrap gap-2">
+        {entries.map((entry) => {
+          const answeredFields = entry.answers.filter((answer) => answer.value || answer.comment)
+
+          return (
+            <li key={entry.id} className="space-y-4 border border-gray-300 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-mono text-sm font-bold">
                 {entry.attendee_first_name} {entry.attendee_last_name}
               </span>
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-sm">
-                  {Array.from({ length: 5 }, (_, i) => (
-                    <span key={i} className={i < entry.rating ? 'text-black' : 'text-gray-300'}>
-                      &#9733;
-                    </span>
-                  ))}
-                </span>
+              <div className="flex flex-wrap items-center gap-3">
+                {entry.rating !== null ? (
+                  <span className="font-mono text-sm font-bold">{entry.rating}/5 overall</span>
+                ) : null}
                 <span className="font-mono text-xs text-gray-500">
                   {new Date(entry.created_at).toLocaleString('en-GB')}
                 </span>
               </div>
             </div>
-            {entry.comment && (
+
+            {answeredFields.length > 0 ? (
+              <div className="space-y-3">
+                {answeredFields.map((answer) => (
+                  <div key={`${entry.id}-${answer.fieldId}`} className="border-l-2 border-black pl-3">
+                    <p className="font-mono text-xs uppercase tracking-[0.18em] text-gray-500">
+                      {answer.label}
+                    </p>
+                    <p className="mt-1 font-mono text-sm font-bold">
+                      {formatFeedbackAnswerValue(answer)}
+                    </p>
+                    {answer.comment ? (
+                      <p className="mt-2 font-mono text-sm leading-6 text-gray-700">
+                        {answer.comment}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : entry.comment ? (
               <p className="font-mono text-sm text-gray-700">{entry.comment}</p>
-            )}
-          </li>
-        ))}
+            ) : null}
+            </li>
+          )
+        })}
       </ul>
     </div>
   )

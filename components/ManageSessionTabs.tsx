@@ -116,7 +116,11 @@ export function ManageSessionTabs({
 
             <Card>
               <h2 className="text-xl font-mono font-bold mb-4">Publish Session</h2>
-              <PublishSessionPanel sessionId={session.id} currentStatus={session.status} />
+              <PublishSessionPanel
+                sessionId={session.id}
+                currentStatus={session.status}
+                dateEnd={session.date_end}
+              />
             </Card>
           </div>
         )}

@@ -7,6 +7,7 @@ import { Textarea } from './Textarea'
 import { Select } from './Select'
 import { Button } from './Button'
 import { createSession } from '@/app/actions/sessions'
+import { assertValidSessionDates } from '@/lib/session-validation'
 
 interface SessionFormProps {
   departmentId: string
@@ -26,12 +27,17 @@ export function SessionForm({ departmentId, departmentName }: SessionFormProps) 
     const formData = new FormData(e.currentTarget)
 
     try {
+      const dateStart = new Date(formData.get('date_start') as string).toISOString()
+      const dateEnd = new Date(formData.get('date_end') as string).toISOString()
+
+      assertValidSessionDates(dateStart, dateEnd)
+
       await createSession({
         department_id: departmentId,
         title: formData.get('title') as string,
         description: formData.get('description')?.toString() || undefined,
-        date_start: new Date(formData.get('date_start') as string).toISOString(),
-        date_end: new Date(formData.get('date_end') as string).toISOString(),
+        date_start: dateStart,
+        date_end: dateEnd,
         location_type: formData.get('location_type') as 'MS_TEAMS' | 'IN_PERSON' | 'HYBRID',
       })
 

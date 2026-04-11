@@ -1,0 +1,300 @@
+import type {
+  Department,
+  DepartmentFeedbackField,
+  DepartmentMember,
+  UserRole,
+} from '@/lib/types'
+import { getDb, getServiceDb } from './client'
+import { DbNotFoundError, toDbError } from './errors'
+
+// -----------------------------------------------------------------------------
+// Departments
+// -----------------------------------------------------------------------------
+
+export async function insertDepartment(input: {
+  orgId: string
+  name: string
+  createdBy: string
+}): Promise<Department> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('departments')
+    .insert({
+      org_id: input.orgId,
+      name: input.name,
+      created_by: input.createdBy,
+    })
+    .select()
+    .single()
+
+  if (error) throw toDbError('Failed to create department', error)
+  return data as Department
+}
+
+export async function listDepartmentsByOrg(orgId: string): Promise<Department[]> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('departments')
+    .select('*')
+    .eq('org_id', orgId)
+    .order('name')
+
+  if (error) throw toDbError('Failed to list departments', error)
+  return (data as Department[] | null) ?? []
+}
+
+export async function findDepartment(
+  id: string,
+  orgId: string
+): Promise<Department | null> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('departments')
+    .select('*')
+    .eq('id', id)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to fetch department', error)
+  return (data as Department | null) ?? null
+}
+
+export async function getDepartmentOrThrow(
+  id: string,
+  orgId: string
+): Promise<Department> {
+  const row = await findDepartment(id, orgId)
+  if (!row) throw new DbNotFoundError(`Department ${id} not found`)
+  return row
+}
+
+/**
+ * Public read of a department (name + feedback form template) without an
+ * org filter. Used by the anonymous feedback page; no authorization needed
+ * because the surface is public-by-design.
+ */
+export async function findDepartmentPublic(
+  id: string
+): Promise<{ name: string; feedback_form_fields: unknown } | null> {
+  const db = await getServiceDb()
+  const { data, error } = await db
+    .from('departments')
+    .select('name, feedback_form_fields')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to fetch department (public)', error)
+  return (
+    (data as { name: string; feedback_form_fields: unknown } | null) ?? null
+  )
+}
+
+/**
+ * Looks up a department's owning org without requiring the caller to know it.
+ * Uses a service-role client because this runs during flows (leave, remove
+ * member) where the user's own org context may be different from the target.
+ * Callers must still verify authorization before invoking.
+ */
+export async function findDepartmentOrgId(id: string): Promise<string | null> {
+  const db = await getServiceDb()
+  const { data, error } = await db
+    .from('departments')
+    .select('org_id')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to look up department org', error)
+  return (data as { org_id: string } | null)?.org_id ?? null
+}
+
+export interface DepartmentSettingsRow {
+  leadName: string | null
+  feedbackFormFields: unknown
+}
+
+export async function findDepartmentNameAndLead(
+  departmentId: string
+): Promise<{ name: string; lead_name: string | null } | null> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('departments')
+    .select('name, lead_name')
+    .eq('id', departmentId)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to fetch department name/lead', error)
+  return (data as { name: string; lead_name: string | null } | null) ?? null
+}
+
+export async function findDepartmentSettings(
+  departmentId: string,
+  orgId: string
+): Promise<DepartmentSettingsRow | null> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('departments')
+    .select('lead_name, feedback_form_fields')
+    .eq('id', departmentId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to fetch department settings', error)
+  if (!data) return null
+
+  const row = data as { lead_name: string | null; feedback_form_fields: unknown }
+  return {
+    leadName: row.lead_name ?? null,
+    feedbackFormFields: row.feedback_form_fields ?? null,
+  }
+}
+
+export async function updateDepartmentLeadName(
+  departmentId: string,
+  orgId: string,
+  leadName: string | null
+): Promise<void> {
+  const db = await getServiceDb()
+  const { error } = await db
+    .from('departments')
+    .update({ lead_name: leadName })
+    .eq('id', departmentId)
+    .eq('org_id', orgId)
+
+  if (error) throw toDbError('Failed to update department lead', error)
+}
+
+export async function updateDepartmentFeedbackFormFields(
+  departmentId: string,
+  orgId: string,
+  fields: DepartmentFeedbackField[]
+): Promise<void> {
+  const db = await getServiceDb()
+  const { error } = await db
+    .from('departments')
+    .update({ feedback_form_fields: fields })
+    .eq('id', departmentId)
+    .eq('org_id', orgId)
+
+  if (error) throw toDbError('Failed to update feedback fields', error)
+}
+
+// -----------------------------------------------------------------------------
+// Department members
+// -----------------------------------------------------------------------------
+
+export async function insertDepartmentMember(input: {
+  orgId: string
+  departmentId: string
+  userId: string
+  role: UserRole
+}): Promise<DepartmentMember> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('department_members')
+    .insert({
+      org_id: input.orgId,
+      department_id: input.departmentId,
+      user_id: input.userId,
+      role: input.role,
+    })
+    .select()
+    .single()
+
+  if (error) throw toDbError('Failed to add department member', error)
+  return data as DepartmentMember
+}
+
+export async function listDepartmentMembers(
+  orgId: string,
+  departmentId: string
+): Promise<DepartmentMember[]> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('department_members')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('department_id', departmentId)
+
+  if (error) throw toDbError('Failed to list department members', error)
+  return (data as DepartmentMember[] | null) ?? []
+}
+
+/**
+ * Returns the user ids of every member of a department, regardless of role.
+ * Uses a service-role client so it can run in flows where the current user
+ * context may not cover the target department. Authorization is the
+ * caller's responsibility.
+ */
+export async function listDepartmentMemberUserIds(
+  departmentId: string
+): Promise<string[]> {
+  const db = await getServiceDb()
+  const { data, error } = await db
+    .from('department_members')
+    .select('user_id')
+    .eq('department_id', departmentId)
+
+  if (error) throw toDbError('Failed to list department member user ids', error)
+  return ((data as { user_id: string }[] | null) ?? []).map((row) => row.user_id)
+}
+
+/**
+ * Returns the departments for which a user is a moderator (`department_admin`)
+ * within a specific org. The embedded `departments:department_id` join is
+ * flattened so callers get a simple `{ id, name }[]`.
+ */
+export async function listModeratedDepartments(
+  userId: string,
+  orgId: string
+): Promise<{ id: string; name: string }[]> {
+  const db = await getDb()
+  const { data, error } = await db
+    .from('department_members')
+    .select('departments:department_id (id, name)')
+    .eq('user_id', userId)
+    .eq('org_id', orgId)
+    .eq('role', 'department_admin')
+
+  if (error) throw toDbError('Failed to list moderated departments', error)
+
+  type Row = {
+    departments:
+      | { id: string; name: string }
+      | { id: string; name: string }[]
+      | null
+  }
+
+  const rows = (data as Row[] | null) ?? []
+  return rows.flatMap((row) => {
+    if (!row.departments) return []
+    return Array.isArray(row.departments) ? row.departments : [row.departments]
+  })
+}
+
+export async function deleteDepartmentMember(
+  departmentId: string,
+  userId: string
+): Promise<void> {
+  const db = await getServiceDb()
+  const { error } = await db
+    .from('department_members')
+    .delete()
+    .eq('department_id', departmentId)
+    .eq('user_id', userId)
+
+  if (error) throw toDbError('Failed to remove department member', error)
+}
+
+export async function deleteOrgMember(
+  orgId: string,
+  userId: string
+): Promise<void> {
+  const db = await getServiceDb()
+  const { error } = await db
+    .from('organization_members')
+    .delete()
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+
+  if (error) throw toDbError('Failed to remove organization member', error)
+}

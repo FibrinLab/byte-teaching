@@ -27,7 +27,7 @@ export default async function AdminPage() {
     return (
       <div className="min-h-screen">
         <NavShell />
-        <div className="mx-auto max-w-6xl px-6 py-6 sm:px-8 sm:py-8 lg:px-12">
+        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-8 lg:px-12">
           <h1 className="mb-6 font-mono text-2xl font-bold sm:text-3xl">Admin Panel</h1>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

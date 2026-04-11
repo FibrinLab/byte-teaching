@@ -53,17 +53,17 @@ export default async function DepartmentSessionsPage({
           <div className="space-y-4">
             {sessions.map(session => (
               <Card key={session.id}>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <h2 className="text-xl font-mono font-bold mb-2">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-xl font-mono font-bold mb-2 break-words">
                       <Link href={`/sessions/${session.id}`} className="hover:underline">
                         {session.title}
                       </Link>
                     </h2>
                     {session.description && (
-                      <p className="font-mono text-sm text-gray-600 mb-2">{session.description}</p>
+                      <p className="font-mono text-sm text-gray-600 mb-2 break-words">{session.description}</p>
                     )}
-                    <div className="flex flex-wrap gap-4 font-mono text-sm">
+                    <div className="flex flex-wrap gap-x-4 gap-y-2 font-mono text-sm">
                       <span>
                         {new Date(session.date_start).toLocaleString('en-GB')}
                       </span>
@@ -76,9 +76,9 @@ export default async function DepartmentSessionsPage({
                     </div>
                   </div>
                   {canManage && (
-                    <div className="flex-shrink-0 flex gap-2">
-                      <Link href={`/sessions/${session.id}/manage`}>
-                        <Button variant="secondary" className="text-xs sm:text-sm">
+                    <div className="flex flex-shrink-0 gap-2">
+                      <Link href={`/sessions/${session.id}/manage`} className="flex-1 sm:flex-none">
+                        <Button variant="secondary" className="w-full text-xs sm:text-sm">
                           Manage
                         </Button>
                       </Link>

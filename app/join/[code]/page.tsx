@@ -21,8 +21,8 @@ export default async function JoinDepartmentPage({
             <p className="mt-3 font-mono text-sm text-gray-600">
               This department invite link is invalid or has been rotated.
             </p>
-            <Link href="/login" className="mt-4 inline-block font-mono text-sm underline">
-              Go to Login →
+            <Link href="/trainee-login" className="mt-4 inline-block font-mono text-sm underline">
+              Go to Trainee Sign-In →
             </Link>
           </Card>
         </div>

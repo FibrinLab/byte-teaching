@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/Button'
+import { useToast } from '@/components/ToastProvider'
 import { removeOrgMember } from '@/app/actions/member-onboarding'
 import type { ManagedOrgMember } from '@/lib/types'
 
@@ -21,19 +22,26 @@ function formatMemberName(member: ManagedOrgMember) {
 
 export function OrgMembersPanel({ members }: OrgMembersPanelProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [loadingUserId, setLoadingUserId] = useState<string | null>(null)
-  const [feedback, setFeedback] = useState<string | null>(null)
 
   async function handleRemove(userId: string) {
     setLoadingUserId(userId)
-    setFeedback(null)
 
     try {
       await removeOrgMember(userId)
-      setFeedback('Member removed from this organization.')
+      showToast({
+        variant: 'success',
+        title: 'Member removed',
+        description: 'The user has been removed from this organization.',
+      })
       router.refresh()
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Failed to remove member')
+      showToast({
+        variant: 'error',
+        title: 'Removal failed',
+        description: error instanceof Error ? error.message : 'Failed to remove member',
+      })
     } finally {
       setLoadingUserId(null)
     }
@@ -45,12 +53,6 @@ export function OrgMembersPanel({ members }: OrgMembersPanelProps) {
 
   return (
     <div className="space-y-4">
-      {feedback ? (
-        <div className="border border-black bg-white px-4 py-3">
-          <p className="font-mono text-sm">{feedback}</p>
-        </div>
-      ) : null}
-
       <div className="space-y-3">
         {members.map((member) => (
           <div

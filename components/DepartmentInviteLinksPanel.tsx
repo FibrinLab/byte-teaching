@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/Button'
+import { useToast } from '@/components/ToastProvider'
 import { rotateDepartmentInviteLink } from '@/app/actions/member-onboarding'
 import type { ManagedDepartmentInviteLink } from '@/lib/types'
 
@@ -13,9 +14,9 @@ interface DepartmentInviteLinksPanelProps {
 
 export function DepartmentInviteLinksPanel({ links }: DepartmentInviteLinksPanelProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [qrCodes, setQrCodes] = useState<Record<string, string>>({})
   const [loadingDepartmentId, setLoadingDepartmentId] = useState<string | null>(null)
-  const [feedback, setFeedback] = useState<string | null>(null)
   const linkKeys = useMemo(() => links.map((link) => `${link.department_id}:${link.invite_url}`).join('|'), [links])
 
   useEffect(() => {
@@ -57,20 +58,39 @@ export function DepartmentInviteLinksPanel({ links }: DepartmentInviteLinksPanel
   }, [linkKeys, links])
 
   async function handleCopy(inviteUrl: string) {
-    await navigator.clipboard.writeText(inviteUrl)
-    setFeedback('Invite link copied to clipboard.')
+    try {
+      await navigator.clipboard.writeText(inviteUrl)
+      showToast({
+        variant: 'success',
+        title: 'Invite link copied',
+        description: 'The department invite link is ready to share.',
+      })
+    } catch (error) {
+      showToast({
+        variant: 'error',
+        title: 'Copy failed',
+        description: error instanceof Error ? error.message : 'Could not copy invite link.',
+      })
+    }
   }
 
   async function handleRotate(departmentId: string) {
     setLoadingDepartmentId(departmentId)
-    setFeedback(null)
 
     try {
       await rotateDepartmentInviteLink(departmentId)
-      setFeedback('Invite link rotated.')
+      showToast({
+        variant: 'success',
+        title: 'Invite link rotated',
+        description: 'The previous invite code has been replaced.',
+      })
       router.refresh()
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : 'Failed to rotate invite link')
+      showToast({
+        variant: 'error',
+        title: 'Rotation failed',
+        description: error instanceof Error ? error.message : 'Failed to rotate invite link',
+      })
     } finally {
       setLoadingDepartmentId(null)
     }
@@ -86,12 +106,6 @@ export function DepartmentInviteLinksPanel({ links }: DepartmentInviteLinksPanel
 
   return (
     <div className="space-y-4">
-      {feedback ? (
-        <div className="border border-black bg-white px-4 py-3">
-          <p className="font-mono text-sm">{feedback}</p>
-        </div>
-      ) : null}
-
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {links.map((link) => (
           <div key={link.department_id} className="border border-black bg-white p-4">

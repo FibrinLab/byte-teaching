@@ -1,10 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import {
-  createSupabaseClient,
-  createSupabaseServiceClient,
-} from '@/lib/supabase/server'
+import { createSupabaseServiceClient } from '@/lib/supabase/server'
 import {
   getCurrentOrgId,
   getCurrentUser,
@@ -14,7 +11,10 @@ import {
   requireOrg,
   requireOrgManager,
 } from '@/lib/auth'
-import { getDepartmentsForOrg, getMyModeratedDepartments } from '@/app/actions/departments'
+import {
+  getDepartmentsForOrg,
+  getMyModeratedDepartments,
+} from '@/app/actions/departments'
 import { getAppUrl } from '@/lib/app-url'
 import { getResendClient } from '@/lib/resend'
 import {
@@ -29,38 +29,14 @@ import type {
   Profile,
   UserRole,
 } from '@/lib/types'
+import * as onboardingDb from '@/lib/db/onboarding'
+import type {
+  InviteLookupRecord,
+  PendingOnboardingRequest,
+} from '@/lib/db/onboarding'
+import { DbNotFoundError } from '@/lib/db'
 
 const DEFAULT_MEMBER_ROLE: UserRole = 'trainee'
-
-interface InviteLookupRecord {
-  id: string
-  org_id: string
-  department_id: string
-  invite_code: string
-  departments: {
-    id: string
-    name: string
-  } | null
-  organizations: {
-    id: string
-    name: string
-  } | null
-}
-
-interface PendingOnboardingRequest {
-  id: string
-  org_id: string
-  department_id: string
-  invite_link_id: string
-  email: string
-  first_name: string
-  last_name: string
-  requested_role: UserRole
-  link_type: OnboardingLinkType
-  requested_user_id: string | null
-  status: 'PENDING' | 'COMPLETED' | 'CANCELLED'
-  completed_at: string | null
-}
 
 interface BeginDepartmentOnboardingInput {
   inviteCode: string
@@ -106,23 +82,6 @@ function generateInviteCode() {
   return code
 }
 
-async function getInviteByCode(inviteCode: string) {
-  const serviceClient = await createSupabaseServiceClient()
-  const normalizedCode = inviteCode.trim().toUpperCase()
-
-  const { data, error } = await serviceClient
-    .from('department_invite_links')
-    .select('id, org_id, department_id, invite_code, departments:department_id(id, name), organizations:org_id(id, name)')
-    .eq('invite_code', normalizedCode)
-    .maybeSingle()
-
-  if (error) {
-    throw new Error(`Failed to resolve invite link: ${error.message}`)
-  }
-
-  return data as InviteLookupRecord | null
-}
-
 async function getManagedDepartmentsForCurrentUser(orgId: string) {
   const [superAdmin, orgAdmin] = await Promise.all([isSuperAdmin(), isOrgAdmin(orgId)])
 
@@ -136,63 +95,34 @@ async function getManagedDepartmentsForCurrentUser(orgId: string) {
 async function ensureInviteLinksForDepartments(
   orgId: string,
   departments: { id: string; name: string }[]
-) {
-  if (departments.length === 0) {
-    return []
-  }
+): Promise<ManagedDepartmentInviteLink[]> {
+  if (departments.length === 0) return []
 
-  const serviceClient = await createSupabaseServiceClient()
   const currentUserId = await getCurrentUserId()
-  const departmentIds = departments.map((department) => department.id)
+  const departmentIds = departments.map((d) => d.id)
 
-  const { data: existingLinks, error: existingLinksError } = await serviceClient
-    .from('department_invite_links')
-    .select('department_id')
-    .in('department_id', departmentIds)
-
-  if (existingLinksError) {
-    throw new Error(`Failed to load invite links: ${existingLinksError.message}`)
-  }
-
-  const existingDepartmentIds = new Set((existingLinks || []).map((row) => row.department_id))
-  const missingDepartments = departments.filter(
-    (department) => !existingDepartmentIds.has(department.id)
+  const existingDepartmentIds = new Set(
+    await onboardingDb.listInviteLinkDepartmentIds(departmentIds)
   )
+  const missingDepartments = departments.filter((d) => !existingDepartmentIds.has(d.id))
 
   if (missingDepartments.length > 0) {
-    const { error: insertError } = await serviceClient
-      .from('department_invite_links')
-      .insert(
-        missingDepartments.map((department) => ({
-          org_id: orgId,
-          department_id: department.id,
-          created_by: currentUserId,
-        }))
-      )
-
-    if (insertError) {
-      throw new Error(`Failed to initialize invite links: ${insertError.message}`)
-    }
+    await onboardingDb.insertInviteLinksForDepartments(
+      missingDepartments.map((d) => ({
+        orgId,
+        departmentId: d.id,
+        createdBy: currentUserId,
+      }))
+    )
   }
 
-  const { data: inviteLinks, error: inviteLinksError } = await serviceClient
-    .from('department_invite_links')
-    .select('department_id, invite_code, rotated_at')
-    .in('department_id', departmentIds)
-
-  if (inviteLinksError) {
-    throw new Error(`Failed to fetch invite links: ${inviteLinksError.message}`)
-  }
-
+  const inviteLinks = await onboardingDb.listInviteLinksForDepartments(departmentIds)
   const appUrl = getAppUrl()
 
   return departments
     .map((department) => {
-      const inviteLink = (inviteLinks || []).find((row) => row.department_id === department.id)
-      if (!inviteLink) {
-        return null
-      }
-
+      const inviteLink = inviteLinks.find((row) => row.department_id === department.id)
+      if (!inviteLink) return null
       return {
         department_id: department.id,
         department_name: department.name,
@@ -213,66 +143,35 @@ async function upsertPendingOnboardingRequest(
     requestedUserId: string | null
     linkType: OnboardingLinkType
   }
-) {
-  const serviceClient = await createSupabaseServiceClient()
+): Promise<PendingOnboardingRequest> {
+  const existing = await onboardingDb.findPendingOnboardingRequest({
+    departmentId: invite.department_id,
+    email: input.email,
+  })
 
-  const { data: existingRequest, error: existingRequestError } = await serviceClient
-    .from('member_onboarding_requests')
-    .select('*')
-    .eq('department_id', invite.department_id)
-    .eq('email', input.email)
-    .eq('status', 'PENDING')
-    .maybeSingle()
-
-  if (existingRequestError) {
-    throw new Error(`Failed to load onboarding request: ${existingRequestError.message}`)
-  }
-
-  if (existingRequest) {
-    const { data, error } = await serviceClient
-      .from('member_onboarding_requests')
-      .update({
-        org_id: invite.org_id,
-        invite_link_id: invite.id,
-        first_name: input.firstName,
-        last_name: input.lastName,
-        requested_role: DEFAULT_MEMBER_ROLE,
-        link_type: input.linkType,
-        requested_user_id: input.requestedUserId,
-      })
-      .eq('id', existingRequest.id)
-      .select('*')
-      .single()
-
-    if (error) {
-      throw new Error(`Failed to update onboarding request: ${error.message}`)
-    }
-
-    return data as PendingOnboardingRequest
-  }
-
-  const { data, error } = await serviceClient
-    .from('member_onboarding_requests')
-    .insert({
-      org_id: invite.org_id,
-      department_id: invite.department_id,
-      invite_link_id: invite.id,
-      email: input.email,
-      first_name: input.firstName,
-      last_name: input.lastName,
-      requested_role: DEFAULT_MEMBER_ROLE,
-      link_type: input.linkType,
-      requested_user_id: input.requestedUserId,
-      status: 'PENDING',
+  if (existing) {
+    return onboardingDb.updateOnboardingRequest(existing.id, {
+      orgId: invite.org_id,
+      inviteLinkId: invite.id,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      requestedRole: DEFAULT_MEMBER_ROLE,
+      linkType: input.linkType,
+      requestedUserId: input.requestedUserId,
     })
-    .select('*')
-    .single()
-
-  if (error) {
-    throw new Error(`Failed to create onboarding request: ${error.message}`)
   }
 
-  return data as PendingOnboardingRequest
+  return onboardingDb.insertOnboardingRequest({
+    orgId: invite.org_id,
+    departmentId: invite.department_id,
+    inviteLinkId: invite.id,
+    email: input.email,
+    firstName: input.firstName,
+    lastName: input.lastName,
+    requestedRole: DEFAULT_MEMBER_ROLE,
+    linkType: input.linkType,
+    requestedUserId: input.requestedUserId,
+  })
 }
 
 async function upsertProfileForUser(params: {
@@ -282,26 +181,15 @@ async function upsertProfileForUser(params: {
   lastName: string
   emailVerifiedAt: string | null
 }) {
-  const serviceClient = await createSupabaseServiceClient()
   const fullName = buildFullName(params.firstName, params.lastName)
-
-  const { error } = await serviceClient
-    .from('profiles')
-    .upsert(
-      {
-        user_id: params.userId,
-        email: params.email,
-        first_name: params.firstName || null,
-        last_name: params.lastName || null,
-        full_name: fullName || null,
-        email_verified_at: params.emailVerifiedAt,
-      },
-      { onConflict: 'user_id' }
-    )
-
-  if (error) {
-    throw new Error(`Failed to update profile: ${error.message}`)
-  }
+  await onboardingDb.upsertProfile({
+    userId: params.userId,
+    email: params.email,
+    firstName: params.firstName || null,
+    lastName: params.lastName || null,
+    fullName: fullName || null,
+    emailVerifiedAt: params.emailVerifiedAt,
+  })
 }
 
 async function finalizeOnboardingRequest(
@@ -314,116 +202,59 @@ async function finalizeOnboardingRequest(
     throw new Error('Signed-in email does not match this invite')
   }
 
-  const serviceClient = await createSupabaseServiceClient()
-  const { data: memberships, error: membershipsError } = await serviceClient
-    .from('organization_members')
-    .select('org_id, role')
-    .eq('user_id', currentUser.id)
+  const memberships = await onboardingDb.listUserOrganizationMemberships(currentUser.id)
 
-  if (membershipsError) {
-    throw new Error(`Failed to load organization memberships: ${membershipsError.message}`)
-  }
-
-  const targetOrgMembership = (memberships || []).find(
-    (membership) => membership.org_id === request.org_id
-  )
+  const targetOrgMembership = memberships.find((m) => m.org_id === request.org_id)
   const otherOrgIds = Array.from(
     new Set(
-      (memberships || [])
-        .filter((membership) => membership.org_id !== request.org_id)
-        .map((membership) => membership.org_id)
+      memberships.filter((m) => m.org_id !== request.org_id).map((m) => m.org_id)
     )
   )
 
   if (otherOrgIds.length > 0) {
-    const { error: removeDepartmentMembershipsError } = await serviceClient
-      .from('department_members')
-      .delete()
-      .eq('user_id', currentUser.id)
-      .in('org_id', otherOrgIds)
-
-    if (removeDepartmentMembershipsError) {
-      throw new Error(
-        `Failed to remove previous department memberships: ${removeDepartmentMembershipsError.message}`
-      )
-    }
-
-    const { error: removeOrganizationMembershipsError } = await serviceClient
-      .from('organization_members')
-      .delete()
-      .eq('user_id', currentUser.id)
-      .in('org_id', otherOrgIds)
-
-    if (removeOrganizationMembershipsError) {
-      throw new Error(
-        `Failed to remove previous organization memberships: ${removeOrganizationMembershipsError.message}`
-      )
-    }
+    await onboardingDb.deleteDepartmentMembershipsInOrgs(currentUser.id, otherOrgIds)
+    await onboardingDb.deleteOrganizationMembershipsInOrgs(currentUser.id, otherOrgIds)
   }
 
-  const { data: existingDepartmentMembership, error: existingDepartmentMembershipError } =
-    await serviceClient
-      .from('department_members')
-      .select('role')
-      .eq('department_id', request.department_id)
-      .eq('user_id', currentUser.id)
-      .maybeSingle()
+  const existingDepartmentRole = await onboardingDb.findDepartmentMembershipRole(
+    request.department_id,
+    currentUser.id
+  )
 
-  if (existingDepartmentMembershipError) {
-    throw new Error(
-      `Failed to load existing department membership: ${existingDepartmentMembershipError.message}`
-    )
-  }
+  const resolvedOrgRole =
+    (targetOrgMembership?.role as UserRole | undefined) || request.requested_role
+  const resolvedDepartmentRole = existingDepartmentRole || request.requested_role
 
-  const resolvedOrgRole = (targetOrgMembership?.role as UserRole | undefined) || request.requested_role
-  const resolvedDepartmentRole =
-    (existingDepartmentMembership?.role as UserRole | undefined) || request.requested_role
+  await onboardingDb.upsertOrganizationMember({
+    orgId: request.org_id,
+    userId: currentUser.id,
+    role: resolvedOrgRole,
+  })
 
-  const { error: organizationMembershipError } = await serviceClient
-    .from('organization_members')
-    .upsert(
-      {
-        org_id: request.org_id,
-        user_id: currentUser.id,
-        role: resolvedOrgRole,
-      },
-      { onConflict: 'org_id,user_id' }
-    )
-
-  if (organizationMembershipError) {
-    throw new Error(
-      `Failed to upsert organization membership: ${organizationMembershipError.message}`
-    )
-  }
-
-  const { error: departmentMembershipError } = await serviceClient
-    .from('department_members')
-    .upsert(
-      {
-        org_id: request.org_id,
-        department_id: request.department_id,
-        user_id: currentUser.id,
-        role: resolvedDepartmentRole,
-      },
-      { onConflict: 'department_id,user_id' }
-    )
-
-  if (departmentMembershipError) {
-    throw new Error(`Failed to upsert department membership: ${departmentMembershipError.message}`)
-  }
+  await onboardingDb.upsertDepartmentMember({
+    orgId: request.org_id,
+    departmentId: request.department_id,
+    userId: currentUser.id,
+    role: resolvedDepartmentRole,
+  })
 
   const firstName = normalizeName(request.first_name)
   const lastName = normalizeName(request.last_name)
   const fullName = buildFullName(firstName, lastName)
 
-  const { error: updateUserError } = await serviceClient.auth.admin.updateUserById(currentUser.id, {
-    user_metadata: {
-      ...(currentUser.user_metadata || {}),
-      first_name: firstName,
-      last_name: lastName,
-      full_name: fullName,
-    },
-  })
+  // Auth-plane: sync user metadata via GoTrue admin API.
+  const serviceClient = await createSupabaseServiceClient()
+  const { error: updateUserError } = await serviceClient.auth.admin.updateUserById(
+    currentUser.id,
+    {
+      user_metadata: {
+        ...(currentUser.user_metadata || {}),
+        first_name: firstName,
+        last_name: lastName,
+        full_name: fullName,
+      },
+    }
+  )
 
   if (updateUserError) {
     throw new Error(`Failed to sync user metadata: ${updateUserError.message}`)
@@ -437,18 +268,7 @@ async function finalizeOnboardingRequest(
     emailVerifiedAt: currentUser.email_confirmed_at || new Date().toISOString(),
   })
 
-  const { error: completeRequestError } = await serviceClient
-    .from('member_onboarding_requests')
-    .update({
-      requested_user_id: currentUser.id,
-      status: 'COMPLETED',
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', request.id)
-
-  if (completeRequestError) {
-    throw new Error(`Failed to complete onboarding request: ${completeRequestError.message}`)
-  }
+  await onboardingDb.markOnboardingRequestComplete(request.id, currentUser.id)
 
   revalidatePath('/admin')
   revalidatePath('/dashboard')
@@ -467,89 +287,47 @@ export async function rotateDepartmentInviteLink(departmentId: string) {
   const orgId = await requireOrg()
   await requireOrgManager(orgId)
 
-  const serviceClient = await createSupabaseServiceClient()
-  const { data: department, error: departmentError } = await serviceClient
-    .from('departments')
-    .select('id, org_id')
-    .eq('id', departmentId)
-    .eq('org_id', orgId)
-    .maybeSingle()
-
-  if (departmentError) {
-    throw new Error(`Failed to load department: ${departmentError.message}`)
-  }
-
+  const department = await onboardingDb.findDepartmentScope(departmentId, orgId)
   if (!department) {
-    throw new Error('Department not found')
+    throw new DbNotFoundError('Department not found')
   }
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const nextCode = generateInviteCode()
-    const { error } = await serviceClient
-      .from('department_invite_links')
-      .update({
-        invite_code: nextCode,
-        rotated_at: new Date().toISOString(),
-      })
-      .eq('department_id', departmentId)
-      .eq('org_id', orgId)
+    const result = await onboardingDb.rotateInviteCode({
+      departmentId,
+      orgId,
+      newCode: nextCode,
+    })
 
-    if (!error) {
+    if (result.ok) {
       revalidatePath('/admin')
       return { success: true }
     }
-
-    if (!error.message.toLowerCase().includes('duplicate')) {
-      throw new Error(`Failed to rotate invite link: ${error.message}`)
-    }
+    // If it was a duplicate, loop and try a fresh code.
   }
 
   throw new Error('Failed to generate a unique invite code')
 }
 
-export async function getOrgMembersForManagement() {
+export async function getOrgMembersForManagement(): Promise<ManagedOrgMember[]> {
   const orgId = await requireOrg()
   await requireOrgManager(orgId)
 
-  const serviceClient = await createSupabaseServiceClient()
-  const [{ data: organizationMembers, error: organizationMembersError }, { data: departmentMembers, error: departmentMembersError }] =
-    await Promise.all([
-      serviceClient
-        .from('organization_members')
-        .select('user_id, role, created_at')
-        .eq('org_id', orgId)
-        .order('created_at', { ascending: true }),
-      serviceClient
-        .from('department_members')
-        .select('user_id, role, departments:department_id(name)')
-        .eq('org_id', orgId),
-    ])
+  const [organizationMembers, departmentMembers] = await Promise.all([
+    onboardingDb.listOrganizationMembers(orgId),
+    onboardingDb.listDepartmentMembersWithNames(orgId),
+  ])
 
-  if (organizationMembersError) {
-    throw new Error(`Failed to fetch organization members: ${organizationMembersError.message}`)
-  }
+  const userIds = organizationMembers.map((m) => m.user_id)
+  if (userIds.length === 0) return []
 
-  if (departmentMembersError) {
-    throw new Error(`Failed to fetch department members: ${departmentMembersError.message}`)
-  }
-
-  const userIds = (organizationMembers || []).map((member) => member.user_id)
-
-  if (userIds.length === 0) {
-    return [] as ManagedOrgMember[]
-  }
-
-  const { data: profiles, error: profilesError } = await serviceClient
-    .from('profiles')
-    .select('user_id, email, full_name, first_name, last_name')
-    .in('user_id', userIds)
-
-  if (profilesError) {
-    throw new Error(`Failed to fetch profiles: ${profilesError.message}`)
-  }
-
-  const profileMap = new Map<string, Pick<Profile, 'email' | 'full_name' | 'first_name' | 'last_name'>>(
-    (profiles || []).map((profile) => [
+  const profiles = await onboardingDb.listProfilesForUsers(userIds)
+  const profileMap = new Map<
+    string,
+    Pick<Profile, 'email' | 'full_name' | 'first_name' | 'last_name'>
+  >(
+    profiles.map((profile) => [
       profile.user_id,
       {
         email: profile.email,
@@ -570,31 +348,24 @@ export async function getOrgMembersForManagement() {
     }
   >()
 
-  for (const member of organizationMembers || []) {
+  for (const member of organizationMembers) {
     membersByUserId.set(member.user_id, {
-      role: member.role as UserRole,
+      role: member.role,
       joinedAt: member.created_at,
       departments: [],
       hasDepartmentAdminRole: false,
     })
   }
 
-  for (const departmentMember of departmentMembers || []) {
+  for (const departmentMember of departmentMembers) {
     const entry = membersByUserId.get(departmentMember.user_id)
-    if (!entry) {
-      continue
-    }
+    if (!entry) continue
 
-    const departmentRelation = departmentMember.departments as
-      | { name: string }
-      | { name: string }[]
-      | null
-    const departmentName = Array.isArray(departmentRelation)
-      ? departmentRelation[0]?.name
-      : departmentRelation?.name
-
-    if (departmentName && !entry.departments.includes(departmentName)) {
-      entry.departments.push(departmentName)
+    if (
+      departmentMember.department_name &&
+      !entry.departments.includes(departmentMember.department_name)
+    ) {
+      entry.departments.push(departmentMember.department_name)
     }
 
     if (departmentMember.role === 'department_admin') {
@@ -602,15 +373,15 @@ export async function getOrgMembersForManagement() {
     }
   }
 
+  // Auth-plane: back-fill profile info from GoTrue for users without a
+  // profile row. Stays on a direct Supabase client until auth swap.
   const missingProfileUserIds = userIds.filter((userId) => !profileMap.has(userId))
   if (missingProfileUserIds.length > 0) {
+    const serviceClient = await createSupabaseServiceClient()
     const fallbackUsers = await Promise.all(
       missingProfileUserIds.map(async (userId) => {
         const { data, error } = await serviceClient.auth.admin.getUserById(userId)
-        if (error || !data.user.email) {
-          return null
-        }
-
+        if (error || !data.user.email) return null
         return {
           userId,
           email: data.user.email,
@@ -629,12 +400,8 @@ export async function getOrgMembersForManagement() {
         }
       })
     )
-
     for (const fallbackUser of fallbackUsers) {
-      if (!fallbackUser) {
-        continue
-      }
-
+      if (!fallbackUser) continue
       profileMap.set(fallbackUser.userId, {
         email: fallbackUser.email,
         full_name: fallbackUser.fullName,
@@ -648,10 +415,7 @@ export async function getOrgMembersForManagement() {
     .map((userId) => {
       const member = membersByUserId.get(userId)
       const profile = profileMap.get(userId)
-      if (!member || !profile?.email) {
-        return null
-      }
-
+      if (!member || !profile?.email) return null
       return {
         user_id: userId,
         email: profile.email,
@@ -660,7 +424,7 @@ export async function getOrgMembersForManagement() {
         last_name: profile.last_name,
         role: member.role,
         joined_at: member.joinedAt,
-        department_names: [...member.departments].sort((left, right) => left.localeCompare(right)),
+        department_names: [...member.departments].sort((a, b) => a.localeCompare(b)),
         removable: member.role !== 'org_admin' && !member.hasDepartmentAdminRole,
       }
     })
@@ -676,63 +440,21 @@ export async function removeOrgMember(memberUserId: string) {
     throw new Error('You cannot remove your own membership from here')
   }
 
-  const serviceClient = await createSupabaseServiceClient()
-  const [{ data: organizationMembership, error: organizationMembershipError }, { data: departmentAdminMembership, error: departmentAdminMembershipError }] =
-    await Promise.all([
-      serviceClient
-        .from('organization_members')
-        .select('role')
-        .eq('org_id', orgId)
-        .eq('user_id', memberUserId)
-        .maybeSingle(),
-      serviceClient
-        .from('department_members')
-        .select('id')
-        .eq('org_id', orgId)
-        .eq('user_id', memberUserId)
-        .eq('role', 'department_admin')
-        .maybeSingle(),
-    ])
+  const [organizationRole, isDepartmentAdmin] = await Promise.all([
+    onboardingDb.findOrganizationMembershipRole({ orgId, userId: memberUserId }),
+    onboardingDb.hasDepartmentAdminRole({ orgId, userId: memberUserId }),
+  ])
 
-  if (organizationMembershipError) {
-    throw new Error(`Failed to load organization membership: ${organizationMembershipError.message}`)
+  if (!organizationRole) {
+    throw new DbNotFoundError('Member not found in this organization')
   }
 
-  if (departmentAdminMembershipError) {
-    throw new Error(`Failed to load department roles: ${departmentAdminMembershipError.message}`)
-  }
-
-  if (!organizationMembership) {
-    throw new Error('Member not found in this organization')
-  }
-
-  if (organizationMembership.role === 'org_admin' || departmentAdminMembership) {
+  if (organizationRole === 'org_admin' || isDepartmentAdmin) {
     throw new Error('Removing organization admins or moderators is out of scope for this flow')
   }
 
-  const { error: removeDepartmentMembershipsError } = await serviceClient
-    .from('department_members')
-    .delete()
-    .eq('org_id', orgId)
-    .eq('user_id', memberUserId)
-
-  if (removeDepartmentMembershipsError) {
-    throw new Error(
-      `Failed to remove department memberships: ${removeDepartmentMembershipsError.message}`
-    )
-  }
-
-  const { error: removeOrganizationMembershipError } = await serviceClient
-    .from('organization_members')
-    .delete()
-    .eq('org_id', orgId)
-    .eq('user_id', memberUserId)
-
-  if (removeOrganizationMembershipError) {
-    throw new Error(
-      `Failed to remove organization membership: ${removeOrganizationMembershipError.message}`
-    )
-  }
+  await onboardingDb.deleteDepartmentMembershipsForOrgUser({ orgId, userId: memberUserId })
+  await onboardingDb.deleteOrganizationMembership({ orgId, userId: memberUserId })
 
   revalidatePath('/admin')
   revalidatePath('/dashboard')
@@ -744,10 +466,10 @@ export async function removeOrgMember(memberUserId: string) {
 export async function beginDepartmentOnboarding(
   input: BeginDepartmentOnboardingInput
 ): Promise<BeginDepartmentOnboardingResult> {
-  const invite = await getInviteByCode(input.inviteCode)
+  const invite = await onboardingDb.findInviteByCode(input.inviteCode)
 
   if (!invite || !invite.departments || !invite.organizations) {
-    throw new Error('Invite link not found')
+    throw new DbNotFoundError('Invite link not found')
   }
 
   const email = normalizeEmail(input.email)
@@ -759,50 +481,23 @@ export async function beginDepartmentOnboarding(
   }
 
   const currentUser = await getCurrentUser()
-  const serviceClient = await createSupabaseServiceClient()
-
-  const { data: profile, error: profileError } = await serviceClient
-    .from('profiles')
-    .select('user_id, email, email_verified_at, first_name, last_name, full_name')
-    .eq('email', email)
-    .maybeSingle()
-
-  if (profileError) {
-    throw new Error(`Failed to load profile: ${profileError.message}`)
-  }
+  const profile = await onboardingDb.findProfileByEmail(email)
 
   const currentUserMatchesEmail =
     !!currentUser?.email && normalizeEmail(currentUser.email) === email
   const resolvedUserId =
     (currentUserMatchesEmail ? currentUser?.id : null) || profile?.user_id || null
   const isVerifiedAccount =
-    !!profile?.email_verified_at || !!(currentUserMatchesEmail && currentUser?.email_confirmed_at)
+    !!profile?.email_verified_at ||
+    !!(currentUserMatchesEmail && currentUser?.email_confirmed_at)
 
   let currentOrgName: string | null = null
 
   if (resolvedUserId) {
-    const { data: memberships, error: membershipsError } = await serviceClient
-      .from('organization_members')
-      .select('org_id, organizations:org_id(name)')
-      .eq('user_id', resolvedUserId)
-
-    if (membershipsError) {
-      throw new Error(`Failed to load existing organization memberships: ${membershipsError.message}`)
-    }
-
-    const conflictingMembership = (memberships || []).find(
-      (membership) => membership.org_id !== invite.org_id
-    )
-
-    if (conflictingMembership) {
-      const organizationRelation = conflictingMembership.organizations as
-        | { name: string }
-        | { name: string }[]
-        | null
-      currentOrgName =
-        Array.isArray(organizationRelation)
-          ? organizationRelation[0]?.name || null
-          : organizationRelation?.name || null
+    const memberships = await onboardingDb.listUserOrganizationMemberships(resolvedUserId)
+    const conflicting = memberships.find((m) => m.org_id !== invite.org_id)
+    if (conflicting) {
+      currentOrgName = conflicting.organization_name
     }
   }
 
@@ -825,12 +520,11 @@ export async function beginDepartmentOnboarding(
 
   if (currentUserMatchesEmail && currentUser?.email_confirmed_at) {
     await finalizeOnboardingRequest(request, currentUser)
-    return {
-      status: 'joined',
-      redirectTo: '/dashboard',
-    }
+    return { status: 'joined', redirectTo: '/dashboard' }
   }
 
+  // Auth-plane: generate onboarding link via GoTrue and send email.
+  const serviceClient = await createSupabaseServiceClient()
   const redirectTo = `${getAppUrl()}/join/callback?requestId=${request.id}`
   const fullName = buildFullName(firstName, lastName)
 
@@ -850,15 +544,8 @@ export async function beginDepartmentOnboarding(
         },
       },
     })
-
-    if (error) {
-      return { actionLink: null, error }
-    }
-
-    return {
-      actionLink: data.properties.action_link,
-      error: null,
-    }
+    if (error) return { actionLink: null, error }
+    return { actionLink: data.properties.action_link, error: null }
   }
 
   let generatedLink = await generateLink(linkType)
@@ -869,16 +556,7 @@ export async function beginDepartmentOnboarding(
     generatedLink.error.message.toLowerCase().includes('already')
   ) {
     generatedLinkType = 'magiclink'
-
-    const { error: updateRequestTypeError } = await serviceClient
-      .from('member_onboarding_requests')
-      .update({ link_type: 'magiclink' })
-      .eq('id', request.id)
-
-    if (updateRequestTypeError) {
-      throw new Error(`Failed to update onboarding request: ${updateRequestTypeError.message}`)
-    }
-
+    await onboardingDb.updateOnboardingRequestLinkType(request.id, 'magiclink')
     generatedLink = await generateLink('magiclink')
   }
 
@@ -891,7 +569,8 @@ export async function beginDepartmentOnboarding(
   actionLink = generatedLink.actionLink
 
   const resend = getResendClient()
-  const fromAddress = process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
+  const fromAddress =
+    process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
   const html =
     generatedLinkType === 'invite'
       ? buildDepartmentInviteActivationEmailHtml({
@@ -937,19 +616,9 @@ export async function finalizeMemberOnboarding(requestId: string) {
     throw new Error('You must be signed in to complete onboarding')
   }
 
-  const serviceClient = await createSupabaseServiceClient()
-  const { data: request, error } = await serviceClient
-    .from('member_onboarding_requests')
-    .select('*')
-    .eq('id', requestId)
-    .maybeSingle()
-
-  if (error) {
-    throw new Error(`Failed to load onboarding request: ${error.message}`)
-  }
-
+  const request = await onboardingDb.findOnboardingRequestById(requestId)
   if (!request) {
-    throw new Error('Onboarding request not found')
+    throw new DbNotFoundError('Onboarding request not found')
   }
 
   if (request.status === 'COMPLETED') {
@@ -960,7 +629,7 @@ export async function finalizeMemberOnboarding(requestId: string) {
     throw new Error('This onboarding request is no longer active')
   }
 
-  await finalizeOnboardingRequest(request as PendingOnboardingRequest, currentUser)
+  await finalizeOnboardingRequest(request, currentUser)
 
   return { success: true, redirectTo: '/dashboard' }
 }
@@ -971,16 +640,7 @@ export async function sendPasswordlessLoginLink(emailInput: string) {
     throw new Error('Email is required')
   }
 
-  const serviceClient = await createSupabaseServiceClient()
-  const { data: profile, error: profileError } = await serviceClient
-    .from('profiles')
-    .select('email_verified_at, first_name, full_name')
-    .eq('email', email)
-    .maybeSingle()
-
-  if (profileError) {
-    throw new Error(`Failed to load account profile: ${profileError.message}`)
-  }
+  const profile = await onboardingDb.findProfileByEmail(email)
 
   if (!profile?.email_verified_at) {
     return {
@@ -989,13 +649,13 @@ export async function sendPasswordlessLoginLink(emailInput: string) {
     }
   }
 
+  // Auth-plane: generate magic link via GoTrue.
+  const serviceClient = await createSupabaseServiceClient()
   const redirectTo = `${getAppUrl()}/join/callback?mode=login&next=/dashboard`
   const { data, error } = await serviceClient.auth.admin.generateLink({
     type: 'magiclink',
     email,
-    options: {
-      redirectTo,
-    },
+    options: { redirectTo },
   })
 
   if (error) {
@@ -1003,7 +663,8 @@ export async function sendPasswordlessLoginLink(emailInput: string) {
   }
 
   const resend = getResendClient()
-  const fromAddress = process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
+  const fromAddress =
+    process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
   const firstName =
     (profile.first_name && profile.first_name.trim()) ||
     (profile.full_name && profile.full_name.trim().split(' ')[0]) ||
@@ -1030,7 +691,7 @@ export async function sendPasswordlessLoginLink(emailInput: string) {
 }
 
 export async function getJoinInviteLandingData(inviteCode: string) {
-  const invite = await getInviteByCode(inviteCode)
+  const invite = await onboardingDb.findInviteByCode(inviteCode)
 
   if (!invite || !invite.departments || !invite.organizations) {
     return null
@@ -1038,18 +699,10 @@ export async function getJoinInviteLandingData(inviteCode: string) {
 
   const currentUser = await getCurrentUser()
   const currentUserMatchesOrg = currentUser ? await getCurrentOrgId() : null
-  let profile: Profile | null = null
 
-  if (currentUser?.id) {
-    const supabase = await createSupabaseClient()
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', currentUser.id)
-      .maybeSingle()
-
-    profile = (data as Profile | null) || null
-  }
+  const profile = currentUser?.id
+    ? await onboardingDb.findProfileByUserId(currentUser.id)
+    : null
 
   return {
     inviteCode: invite.invite_code,

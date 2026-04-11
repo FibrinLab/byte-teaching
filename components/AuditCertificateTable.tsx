@@ -37,7 +37,49 @@ export function AuditCertificateTable({ certificates }: AuditCertificateTablePro
         onChange={e => setSearch(e.target.value)}
       />
 
-      <div className="overflow-x-auto">
+      {/* Mobile: stacked cards */}
+      <div className="md:hidden">
+        {filtered.length === 0 ? (
+          <p className="py-4 text-center font-mono text-sm text-gray-500">
+            No certificates match your search.
+          </p>
+        ) : (
+          <ul className="space-y-3">
+            {filtered.map(cert => (
+              <li key={cert.id} className="border border-gray-300 p-3 font-mono text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-bold break-words">
+                    {cert.recipientName || cert.recipientEmail || (
+                      <span className="text-gray-400">Unknown</span>
+                    )}
+                  </span>
+                  <span className="flex-shrink-0 text-xs border border-black px-1.5 py-0.5">
+                    {cert.certificateRole}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs break-words">{cert.sessionTitle}</p>
+                <p className="text-xs text-gray-500 break-words">{cert.departmentName}</p>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <a
+                    href={`/verify/${cert.certificateCode}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs hover:underline text-gray-700 break-all"
+                  >
+                    {cert.certificateCode}
+                  </a>
+                  <span className="flex-shrink-0 text-xs text-gray-600">
+                    {new Date(cert.issuedAt).toLocaleDateString('en-GB')}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Desktop: table */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full border-collapse font-mono text-sm">
           <thead>
             <tr className="border-b-2 border-black text-left">

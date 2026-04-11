@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from './Button'
 import { Input } from './Input'
+import { useToast } from './ToastProvider'
 import { updateDepartmentLeadSettings } from '@/app/actions/departments'
 
 interface SignatureUploadPanelProps {
@@ -16,22 +17,27 @@ export function SignatureUploadPanel({
   initialLeadName,
 }: SignatureUploadPanelProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [leadName, setLeadName] = useState(initialLeadName)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
 
   async function handleSave() {
     setLoading(true)
-    setError(null)
-    setSuccess(null)
 
     try {
       await updateDepartmentLeadSettings(departmentId, leadName)
-      setSuccess('Settings saved')
+      showToast({
+        variant: 'success',
+        title: 'Settings saved',
+        description: 'Certificate signature settings have been updated.',
+      })
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save settings')
+      showToast({
+        variant: 'error',
+        title: 'Save failed',
+        description: err instanceof Error ? err.message : 'Failed to save settings',
+      })
     } finally {
       setLoading(false)
     }
@@ -44,13 +50,6 @@ export function SignatureUploadPanel({
   return (
     <div className="space-y-4">
       <h3 className="font-mono font-bold text-sm">Certificate Settings</h3>
-
-      {error && (
-        <p className="font-mono text-xs text-red-600">{error}</p>
-      )}
-      {success && (
-        <p className="font-mono text-xs text-green-600">{success}</p>
-      )}
 
       <Input
         label="Teaching Lead Name"

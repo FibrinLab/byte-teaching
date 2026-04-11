@@ -4,6 +4,7 @@ import { getCurrentOrgId, getCurrentUser, isOrgAdmin, isOrgManager } from '@/lib
 import { NavShell } from '@/components/NavShell'
 import { Card } from '@/components/Card'
 import { SignatureUploadPanel } from '@/components/SignatureUploadPanel'
+import { FeedbackTemplatePanel } from '@/components/FeedbackTemplatePanel'
 import { DepartmentInviteLinksPanel } from '@/components/DepartmentInviteLinksPanel'
 import { OrgMembersPanel } from '@/components/OrgMembersPanel'
 import {
@@ -67,7 +68,7 @@ export default async function SettingsPage() {
   return (
     <div className="min-h-screen">
       <NavShell />
-      <div className="mx-auto max-w-6xl px-6 py-6 sm:px-8 sm:py-8 lg:px-12">
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-8 lg:px-12">
         <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl sm:text-3xl font-mono font-bold">Settings</h1>
@@ -128,8 +129,8 @@ export default async function SettingsPage() {
             <Card>
               <h2 className="mb-2 text-xl font-mono font-bold">Certificate Settings</h2>
               <p className="font-mono text-sm text-gray-600">
-                Update the teaching lead signature shown on certificate PDFs and preview each
-                department&apos;s current certificate layout before issuing it.
+                Update department feedback fields and certificate details from a single settings
+                surface.
               </p>
             </Card>
 
@@ -139,13 +140,23 @@ export default async function SettingsPage() {
                   <div className="mb-5">
                     <h2 className="text-xl font-mono font-bold">{department.name}</h2>
                     <p className="mt-2 font-mono text-sm text-gray-600">
-                      Certificates issued for this department will use these signature details.
+                      Edit the public feedback form and the certificate signature used for this
+                      department.
                     </p>
                   </div>
-                  <SignatureUploadPanel
-                    departmentId={department.id}
-                    initialLeadName={settings.leadName}
-                  />
+                  <div className="space-y-6">
+                    <FeedbackTemplatePanel
+                      departmentId={department.id}
+                      initialFields={settings.feedbackFormFields}
+                    />
+
+                    <div className="border-t border-black pt-6">
+                      <SignatureUploadPanel
+                        departmentId={department.id}
+                        initialLeadName={settings.leadName}
+                      />
+                    </div>
+                  </div>
                 </Card>
               ))}
             </div>

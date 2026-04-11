@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Input } from './Input'
 import { Button } from './Button'
+import { useToast } from './ToastProvider'
 import { updateSessionMeetingUrl } from '@/app/actions/sessions'
 
 interface UpdateMeetingUrlFormProps {
@@ -13,26 +14,30 @@ interface UpdateMeetingUrlFormProps {
 
 export function UpdateMeetingUrlForm({ sessionId, currentUrl }: UpdateMeetingUrlFormProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setLoading(true)
-    setError(null)
-    setSuccess(false)
 
     const formData = new FormData(e.currentTarget)
     const url = formData.get('url')?.toString() || null
 
     try {
       await updateSessionMeetingUrl(sessionId, url || '')
-      setSuccess(true)
+      showToast({
+        variant: 'success',
+        title: 'Meeting URL updated',
+        description: 'The session meeting link has been saved.',
+      })
       router.refresh()
-      setTimeout(() => setSuccess(false), 3000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update meeting URL')
+      showToast({
+        variant: 'error',
+        title: 'Update failed',
+        description: err instanceof Error ? err.message : 'Failed to update meeting URL',
+      })
     } finally {
       setLoading(false)
     }
@@ -40,18 +45,6 @@ export function UpdateMeetingUrlForm({ sessionId, currentUrl }: UpdateMeetingUrl
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {error && (
-        <div className="p-4 border border-red-500 bg-red-50">
-          <p className="font-mono text-sm text-red-800">{error}</p>
-        </div>
-      )}
-
-      {success && (
-        <div className="p-4 border border-green-500 bg-green-50">
-          <p className="font-mono text-sm text-green-800">Meeting URL updated successfully!</p>
-        </div>
-      )}
-
       <Input
         label="MS Teams Meeting URL"
         name="url"

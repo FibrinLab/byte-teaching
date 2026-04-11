@@ -1,6 +1,7 @@
-import { createSupabaseServiceClient } from '@/lib/supabase/server'
 import { Card } from '@/components/Card'
 import { TeacherRsvpForm } from '@/components/TeacherRsvpForm'
+import * as sessionsDb from '@/lib/db/sessions'
+import * as teacherInvitationsDb from '@/lib/db/teacher-invitations'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,17 +10,12 @@ export default async function TeacherRsvpPage({
 }: {
   params: { id: string; code: string }
 }) {
-  const serviceClient = await createSupabaseServiceClient()
+  const invitation = await teacherInvitationsDb.findInvitationByCodeAndSession({
+    inviteCode: params.code,
+    sessionId: params.id,
+  })
 
-  // Look up invitation by code
-  const { data: invitation, error } = await serviceClient
-    .from('teacher_invitations')
-    .select('*')
-    .eq('invite_code', params.code)
-    .eq('session_id', params.id)
-    .single()
-
-  if (error || !invitation) {
+  if (!invitation) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
         <Card>
@@ -38,27 +34,22 @@ export default async function TeacherRsvpPage({
         <Card>
           <h1 className="text-xl font-mono font-bold mb-2">Already Responded</h1>
           <p className="font-mono text-sm text-gray-600">
-            You have already {invitation.status === 'ACCEPTED' ? 'accepted' : 'declined'} this invitation.
+            You have already{' '}
+            {invitation.status === 'ACCEPTED' ? 'accepted' : 'declined'} this invitation.
           </p>
         </Card>
       </div>
     )
   }
 
-  // Get session details
-  const { data: session } = await serviceClient
-    .from('sessions')
-    .select('title, date_start, date_end, location_type, description')
-    .eq('id', params.id)
-    .single()
-
+  const session = await sessionsDb.findSessionById(params.id)
   const startDate = session ? new Date(session.date_start) : null
   const endDate = session ? new Date(session.date_end) : null
 
   const locationLabel: Record<string, string> = {
-    'MS_TEAMS': 'Microsoft Teams (Online)',
-    'IN_PERSON': 'In Person',
-    'HYBRID': 'Hybrid (In Person + Online)',
+    MS_TEAMS: 'Microsoft Teams (Online)',
+    IN_PERSON: 'In Person',
+    HYBRID: 'Hybrid (In Person + Online)',
   }
 
   return (
@@ -82,14 +73,23 @@ export default async function TeacherRsvpPage({
                   <p>
                     <strong>Date:</strong>{' '}
                     {startDate.toLocaleDateString('en-GB', {
-                      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
                     })}
                   </p>
                   <p>
                     <strong>Time:</strong>{' '}
-                    {startDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                    {' - '}
-                    {endDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                    {startDate.toLocaleTimeString('en-GB', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}{' '}
+                    -{' '}
+                    {endDate.toLocaleTimeString('en-GB', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
                   </p>
                 </>
               )}

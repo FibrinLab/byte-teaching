@@ -1,6 +1,8 @@
-import { createSupabaseServiceClient } from '@/lib/supabase/server'
 import { Card } from '@/components/Card'
 import { FeedbackForm } from '@/components/FeedbackForm'
+import { normalizeDepartmentFeedbackFields } from '@/lib/feedback-form'
+import * as departmentsDb from '@/lib/db/departments'
+import * as sessionsDb from '@/lib/db/sessions'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,14 +11,7 @@ export default async function DepartmentFeedbackPage({
 }: {
   params: { id: string }
 }) {
-  const serviceClient = await createSupabaseServiceClient()
-
-  // Get department name
-  const { data: department } = await serviceClient
-    .from('departments')
-    .select('name')
-    .eq('id', params.id)
-    .single()
+  const department = await departmentsDb.findDepartmentPublic(params.id)
 
   if (!department) {
     return (
@@ -33,16 +28,10 @@ export default async function DepartmentFeedbackPage({
 
   // Find active published session for this department
   // Active = 15 mins before date_start to feedback_valid_mins_after_end after date_end
-  const now = new Date().toISOString()
+  const sessions = await sessionsDb.listPublishedSessionsForDepartmentPublic(params.id)
+  const now = new Date()
 
-  const { data: sessions } = await serviceClient
-    .from('sessions')
-    .select('*')
-    .eq('department_id', params.id)
-    .eq('status', 'PUBLISHED')
-    .order('date_start', { ascending: false })
-
-  const activeSession = sessions?.find(session => {
+  const activeSession = sessions.find((session) => {
     const start = new Date(session.date_start)
     const end = new Date(session.date_end)
     const windowBefore = 15 // minutes before start
@@ -50,9 +39,8 @@ export default async function DepartmentFeedbackPage({
 
     const windowStart = new Date(start.getTime() - windowBefore * 60 * 1000)
     const windowEnd = new Date(end.getTime() + windowAfter * 60 * 1000)
-    const currentTime = new Date(now)
 
-    return currentTime >= windowStart && currentTime <= windowEnd
+    return now >= windowStart && now <= windowEnd
   })
 
   if (!activeSession) {
@@ -72,9 +60,9 @@ export default async function DepartmentFeedbackPage({
   const endDate = new Date(activeSession.date_end)
 
   const locationLabel: Record<string, string> = {
-    'MS_TEAMS': 'Microsoft Teams (Online)',
-    'IN_PERSON': 'In Person',
-    'HYBRID': 'Hybrid (In Person + Online)',
+    MS_TEAMS: 'Microsoft Teams (Online)',
+    IN_PERSON: 'In Person',
+    HYBRID: 'Hybrid (In Person + Online)',
   }
 
   return (
@@ -88,14 +76,24 @@ export default async function DepartmentFeedbackPage({
           <div className="space-y-1 font-mono text-sm text-gray-600">
             <p>
               {startDate.toLocaleDateString('en-GB', {
-                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+              })}{' '}
+              {startDate.toLocaleTimeString('en-GB', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}{' '}
+              -{' '}
+              {endDate.toLocaleTimeString('en-GB', {
+                hour: '2-digit',
+                minute: '2-digit',
               })}
-              {' '}
-              {startDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-              {' - '}
-              {endDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
             </p>
-            <p>{locationLabel[activeSession.location_type] || activeSession.location_type}</p>
+            <p>
+              {locationLabel[activeSession.location_type] || activeSession.location_type}
+            </p>
           </div>
         </div>
 
@@ -104,7 +102,13 @@ export default async function DepartmentFeedbackPage({
           <p className="font-mono text-sm text-gray-600 mb-6">
             Please complete this form to record your attendance and provide feedback.
           </p>
-          <FeedbackForm sessionId={activeSession.id} sessionTitle={activeSession.title} />
+          <FeedbackForm
+            sessionId={activeSession.id}
+            sessionTitle={activeSession.title}
+            feedbackFields={normalizeDepartmentFeedbackFields(
+              department.feedback_form_fields
+            )}
+          />
         </Card>
       </div>
     </div>

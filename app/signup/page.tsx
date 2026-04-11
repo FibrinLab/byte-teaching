@@ -97,11 +97,11 @@ export default function SignupPage() {
             <h3 className="font-mono font-bold text-green-800 mb-2">✓ Account Created Successfully!</h3>
             <p className="font-mono text-sm text-green-800 mb-4">{success}</p>
             <p className="font-mono text-sm text-green-700 mb-4">
-              After clicking the confirmation link in your email, you can log in to your account.
+              After clicking the confirmation link in your email, you can sign in with your staff account.
             </p>
             <Link href="/login">
               <Button variant="primary" className="w-full">
-                Go to Login
+                Go to Staff Login
               </Button>
             </Link>
           </div>
@@ -137,9 +137,15 @@ export default function SignupPage() {
             </form>
 
             <p className="font-mono text-sm mt-4 text-center">
-              Already have an account?{' '}
+              Already have a staff account?{' '}
               <Link href="/login" className="underline">
-                Login
+                Staff Login
+              </Link>
+            </p>
+            <p className="font-mono text-sm mt-2 text-center text-gray-600">
+              Trainee with an invite?{' '}
+              <Link href="/trainee-login" className="underline text-black">
+                Use trainee sign-in
               </Link>
             </p>
           </>

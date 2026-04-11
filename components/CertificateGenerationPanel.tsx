@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from './Button'
+import { useToast } from './ToastProvider'
 import { generateCertificatesForSession } from '@/app/actions/certificates'
 
 interface CertificateGenerationPanelProps {
@@ -15,24 +16,28 @@ export function CertificateGenerationPanel({
   attendance,
 }: CertificateGenerationPanelProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
 
   const presentAttendees = attendance.filter(a => a.status === 'PRESENT' || a.status === 'LATE')
 
   async function handleGenerateCertificates() {
     setLoading(true)
-    setError(null)
-    setSuccess(false)
 
     try {
       await generateCertificatesForSession(sessionId)
-      setSuccess(true)
+      showToast({
+        variant: 'success',
+        title: 'Certificates generated',
+        description: 'They are now available in the Certificates section.',
+      })
       router.refresh()
-      setTimeout(() => setSuccess(false), 5000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate certificates')
+      showToast({
+        variant: 'error',
+        title: 'Certificate generation failed',
+        description: err instanceof Error ? err.message : 'Failed to generate certificates',
+      })
     } finally {
       setLoading(false)
     }
@@ -40,20 +45,6 @@ export function CertificateGenerationPanel({
 
   return (
     <div className="space-y-4">
-      {error && (
-        <div className="p-4 border border-red-500 bg-red-50">
-          <p className="font-mono text-sm text-red-800">{error}</p>
-        </div>
-      )}
-
-      {success && (
-        <div className="p-4 border border-green-500 bg-green-50">
-          <p className="font-mono text-sm text-green-800">
-            Certificates generated successfully! They are now available in the Certificates section.
-          </p>
-        </div>
-      )}
-
       <div>
         <p className="font-mono text-sm mb-4">
           Generate attendance certificates for all present attendees and teachers. Certificates will include QR codes for verification.

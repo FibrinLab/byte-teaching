@@ -1,6 +1,6 @@
 import { Nav } from '@/components/Nav'
-import { createSupabaseClient } from '@/lib/supabase/server'
 import { getCurrentUserId, isSuperAdmin } from '@/lib/auth'
+import * as organizationsDb from '@/lib/db/organizations'
 
 export async function NavShell() {
   const userId = await getCurrentUserId()
@@ -11,31 +11,11 @@ export async function NavShell() {
     if (await isSuperAdmin()) {
       adminLink = { href: '/super-admin', label: 'Super Admin' }
       roleLabel = 'Super Admin'
-    } else {
-      const supabase = await createSupabaseClient()
-
-      const { data: orgAdmin } = await supabase
-        .from('organization_members')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('role', 'org_admin')
-        .maybeSingle()
-
-      if (orgAdmin) {
-        adminLink = { href: '/admin', label: 'Admin' }
-        roleLabel = 'Org Admin'
-      } else {
-        const { data: deptAdmin } = await supabase
-          .from('department_members')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('role', 'department_admin')
-          .maybeSingle()
-
-        if (deptAdmin) {
-          roleLabel = 'Moderator'
-        }
-      }
+    } else if (await organizationsDb.userIsOrgAdminAnywhere(userId)) {
+      adminLink = { href: '/admin', label: 'Admin' }
+      roleLabel = 'Org Admin'
+    } else if (await organizationsDb.userIsDepartmentAdminAnywhere(userId)) {
+      roleLabel = 'Moderator'
     }
   }
 

@@ -7,6 +7,7 @@ import { Textarea } from './Textarea'
 import { Select } from './Select'
 import { Button } from './Button'
 import { updateSession } from '@/app/actions/sessions'
+import { assertValidSessionDates } from '@/lib/session-validation'
 import type { Session } from '@/lib/types'
 
 interface EditSessionFormProps {
@@ -35,12 +36,16 @@ export function EditSessionForm({ session, onCancel, onSave }: EditSessionFormPr
 
     try {
       const capacityVal = formData.get('capacity')?.toString()
+      const dateStart = new Date(formData.get('date_start') as string).toISOString()
+      const dateEnd = new Date(formData.get('date_end') as string).toISOString()
+
+      assertValidSessionDates(dateStart, dateEnd)
 
       await updateSession(session.id, {
         title: formData.get('title') as string,
         description: formData.get('description')?.toString() || null,
-        date_start: new Date(formData.get('date_start') as string).toISOString(),
-        date_end: new Date(formData.get('date_end') as string).toISOString(),
+        date_start: dateStart,
+        date_end: dateEnd,
         location_type: formData.get('location_type') as 'MS_TEAMS' | 'IN_PERSON' | 'HYBRID',
         capacity: capacityVal ? parseInt(capacityVal, 10) : null,
       })

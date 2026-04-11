@@ -1,10 +1,14 @@
 'use server'
 
-import { createSupabaseClient, createSupabaseServiceClient } from '@/lib/supabase/server'
+import { revalidatePath } from 'next/cache'
 import { requireAuth, requireOrg, requireDepartmentModerator } from '@/lib/auth'
 import { getResendClient } from '@/lib/resend'
-import { revalidatePath } from 'next/cache'
 import type { EmailType, Session } from '@/lib/types'
+import { createSupabaseServiceClient } from '@/lib/supabase/server'
+import * as sessionsDb from '@/lib/db/sessions'
+import * as teacherEmailsDb from '@/lib/db/teacher-emails'
+import * as teacherInvitationsDb from '@/lib/db/teacher-invitations'
+import { DbNotFoundError } from '@/lib/db'
 
 export async function sendTeacherEmail(
   sessionId: string,
@@ -13,59 +17,43 @@ export async function sendTeacherEmail(
 ) {
   const currentUserId = await requireAuth()
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  // Get session details
-  const { data: session, error: sessionError } = await supabase
-    .from('sessions')
-    .select('*')
-    .eq('id', sessionId)
-    .eq('org_id', orgId)
-    .single()
-
-  if (sessionError || !session) {
-    throw new Error('Session not found')
+  const session = await sessionsDb.findSession(sessionId, orgId)
+  if (!session) {
+    throw new DbNotFoundError('Session not found')
   }
 
   await requireDepartmentModerator(session.department_id)
 
-  // Verify teacher is assigned to this session
-  const { data: teacherAssignment } = await supabase
-    .from('session_teachers')
-    .select('id')
-    .eq('session_id', sessionId)
-    .eq('user_id', teacherUserId)
-    .single()
-
+  const teachers = await sessionsDb.listSessionTeachers(orgId, sessionId)
+  const teacherAssignment = teachers.find((t) => t.user_id === teacherUserId)
   if (!teacherAssignment) {
     throw new Error('User is not a teacher for this session')
   }
 
-  // Get teacher email via admin API
-  const serviceClient = await createSupabaseServiceClient()
-  const { data: userData, error: userError } = await serviceClient.auth.admin.getUserById(teacherUserId)
+  // Auth-plane: resolve the teacher's email via GoTrue admin API. Stays on a
+  // direct Supabase client until auth is swapped out.
+  const supabase = await createSupabaseServiceClient()
+  const { data: userData, error: userError } =
+    await supabase.auth.admin.getUserById(teacherUserId)
 
   if (userError || !userData.user.email) {
     throw new Error('Could not retrieve teacher email address')
   }
 
   const teacherEmail = userData.user.email
+  const departmentName =
+    (await teacherInvitationsDb.findDepartmentName(session.department_id)) || ''
 
-  // Get department name
-  const { data: department } = await supabase
-    .from('departments')
-    .select('name')
-    .eq('id', session.department_id)
-    .single()
-
-  // Send email via Resend
   const resend = getResendClient()
-  const subject = emailType === 'INVITATION'
-    ? `You're invited to teach: ${session.title}`
-    : `Reminder: Upcoming session - ${session.title}`
+  const subject =
+    emailType === 'INVITATION'
+      ? `You're invited to teach: ${session.title}`
+      : `Reminder: Upcoming session - ${session.title}`
 
-  const htmlBody = buildEmailHtml(session as Session, department?.name || '', emailType)
-  const fromAddress = process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
+  const htmlBody = buildEmailHtml(session, departmentName, emailType)
+  const fromAddress =
+    process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
 
   const { data: emailResult, error: emailError } = await resend.emails.send({
     from: fromAddress,
@@ -78,21 +66,18 @@ export async function sendTeacherEmail(
     throw new Error(`Failed to send email: ${emailError.message}`)
   }
 
-  // Record in teacher_emails table
-  const { error: recordError } = await serviceClient
-    .from('teacher_emails')
-    .insert({
-      org_id: orgId,
-      session_id: sessionId,
-      user_id: teacherUserId,
-      email_type: emailType,
-      recipient_email: teacherEmail,
-      sent_by: currentUserId,
-      resend_id: emailResult?.id || null,
+  try {
+    await teacherEmailsDb.insertTeacherEmail({
+      orgId,
+      sessionId,
+      userId: teacherUserId,
+      emailType,
+      recipientEmail: teacherEmail,
+      sentBy: currentUserId,
+      resendId: emailResult?.id || null,
     })
-
-  if (recordError) {
-    console.error('Failed to record email send:', recordError.message)
+  } catch (recordError) {
+    console.error('Failed to record email send:', recordError)
   }
 
   revalidatePath(`/sessions/${sessionId}/manage`)
@@ -102,20 +87,7 @@ export async function sendTeacherEmail(
 export async function getTeacherEmailHistory(sessionId: string) {
   await requireAuth()
   const orgId = await requireOrg()
-  const serviceClient = await createSupabaseServiceClient()
-
-  const { data, error } = await serviceClient
-    .from('teacher_emails')
-    .select('*')
-    .eq('session_id', sessionId)
-    .eq('org_id', orgId)
-    .order('sent_at', { ascending: false })
-
-  if (error) {
-    throw new Error(`Failed to fetch email history: ${error.message}`)
-  }
-
-  return data || []
+  return teacherEmailsDb.listTeacherEmailsForSession(orgId, sessionId)
 }
 
 function buildEmailHtml(
@@ -126,24 +98,30 @@ function buildEmailHtml(
   const startDate = new Date(session.date_start)
   const endDate = new Date(session.date_end)
   const dateStr = startDate.toLocaleDateString('en-GB', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
   })
   const startTime = startDate.toLocaleTimeString('en-GB', {
-    hour: '2-digit', minute: '2-digit'
+    hour: '2-digit',
+    minute: '2-digit',
   })
   const endTime = endDate.toLocaleTimeString('en-GB', {
-    hour: '2-digit', minute: '2-digit'
+    hour: '2-digit',
+    minute: '2-digit',
   })
 
   const locationLabel: Record<string, string> = {
-    'MS_TEAMS': 'Microsoft Teams (Online)',
-    'IN_PERSON': 'In Person',
-    'HYBRID': 'Hybrid (In Person + Online)',
+    MS_TEAMS: 'Microsoft Teams (Online)',
+    IN_PERSON: 'In Person',
+    HYBRID: 'Hybrid (In Person + Online)',
   }
 
-  const heading = emailType === 'INVITATION'
-    ? 'You have been invited to teach a session'
-    : 'This is a reminder about an upcoming session you are teaching'
+  const heading =
+    emailType === 'INVITATION'
+      ? 'You have been invited to teach a session'
+      : 'This is a reminder about an upcoming session you are teaching'
 
   const teamsSection = session.teams_meeting_url
     ? `<tr>

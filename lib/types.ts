@@ -8,6 +8,7 @@ export type EmailType = 'INVITATION' | 'REMINDER'
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED'
 export type OnboardingLinkType = 'invite' | 'magiclink'
 export type OnboardingRequestStatus = 'PENDING' | 'COMPLETED' | 'CANCELLED'
+export type FeedbackFieldType = 'rating' | 'textarea' | 'text'
 
 export interface Department {
   id: string
@@ -15,6 +16,31 @@ export interface Department {
   name: string
   created_by: string
   created_at: string
+  feedback_form_fields?: DepartmentFeedbackField[]
+}
+
+export interface DepartmentFeedbackField {
+  id: string
+  type: FeedbackFieldType
+  label: string
+  required: boolean
+  commentLabel?: string | null
+  placeholder?: string | null
+}
+
+export interface FeedbackAnswerInput {
+  fieldId: string
+  value?: string
+  comment?: string
+}
+
+export interface SubmittedFeedbackAnswer {
+  fieldId: string
+  type: FeedbackFieldType
+  label: string
+  value: string | null
+  commentLabel: string | null
+  comment: string | null
 }
 
 export interface DepartmentMember {

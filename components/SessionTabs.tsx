@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Card } from './Card'
 import { AttendanceList } from './AttendanceList'
 import { Button } from './Button'
+import { useToast } from './ToastProvider'
 import { generateCertificatesForSession } from '@/app/actions/certificates'
 import type { Session } from '@/lib/types'
 
@@ -22,6 +23,7 @@ export function SessionTabs({
   attendance,
 }: SessionTabsProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [activeTab, setActiveTab] = useState<'attendance'>('attendance')
   const [generatingCertificates, setGeneratingCertificates] = useState(false)
 
@@ -29,10 +31,19 @@ export function SessionTabs({
     setGeneratingCertificates(true)
     try {
       await generateCertificatesForSession(sessionId)
+      showToast({
+        variant: 'success',
+        title: 'Certificates generated',
+        description: 'Attendance certificates are now ready.',
+      })
       router.refresh()
     } catch (error) {
       console.error('Failed to generate certificates:', error)
-      alert('Failed to generate certificates. Please try again.')
+      showToast({
+        variant: 'error',
+        title: 'Certificate generation failed',
+        description: error instanceof Error ? error.message : 'Please try again.',
+      })
     } finally {
       setGeneratingCertificates(false)
     }

@@ -58,7 +58,7 @@ export default async function DashboardPage() {
     return (
       <div className="min-h-screen">
         <NavShell />
-        <div className="mx-auto max-w-[1320px] px-6 py-6 sm:px-8 sm:py-8 lg:px-12">
+        <div className="mx-auto max-w-[1320px] px-4 py-6 sm:px-8 sm:py-8 lg:px-12">
           <div className="mb-6 sm:mb-8">
             <h1 className="text-2xl sm:text-3xl font-mono font-bold mb-2">{moderatedDept.name}</h1>
             <p className="font-mono text-sm text-gray-600">Moderator Dashboard</p>
@@ -98,7 +98,7 @@ export default async function DashboardPage() {
   return (
     <div className="min-h-screen">
       <NavShell />
-      <div className="mx-auto max-w-[1320px] px-6 py-6 sm:px-8 sm:py-8 lg:px-12">
+      <div className="mx-auto max-w-[1320px] px-4 py-6 sm:px-8 sm:py-8 lg:px-12">
         <h1 className="text-2xl sm:text-3xl font-mono font-bold mb-6 sm:mb-8">Dashboard</h1>
 
         <section className="mb-6 sm:mb-8">

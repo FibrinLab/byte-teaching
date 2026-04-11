@@ -1,8 +1,9 @@
 'use server'
 
-import { createSupabaseServiceClient } from '@/lib/supabase/server'
 import { requireAuth, requireOrg, isOrgAdmin, isSuperAdmin } from '@/lib/auth'
+import { createSupabaseServiceClient } from '@/lib/supabase/server'
 import { getMyModeratedDepartments, getDepartments } from './departments'
+import * as auditDb from '@/lib/db/audit'
 
 export interface AuditSummaryStats {
   totalSessions: number
@@ -52,11 +53,25 @@ export interface AuditPageData {
   departmentNames: { id: string; name: string }[]
 }
 
+function groupBy<T extends Record<string, unknown>>(
+  arr: T[],
+  key: keyof T
+): Record<string, T[]> {
+  return arr.reduce(
+    (acc, item) => {
+      const k = String(item[key])
+      if (!acc[k]) acc[k] = []
+      acc[k].push(item)
+      return acc
+    },
+    {} as Record<string, T[]>
+  )
+}
+
 export async function getAuditPageData(): Promise<AuditPageData> {
   await requireAuth()
   const orgId = await requireOrg()
 
-  // Determine which departments the user can audit
   const orgAdmin = await isOrgAdmin()
   const superAdmin = await isSuperAdmin()
 
@@ -65,68 +80,53 @@ export async function getAuditPageData(): Promise<AuditPageData> {
 
   if (orgAdmin || superAdmin) {
     const allDepts = await getDepartments()
-    departmentIds = allDepts.map(d => d.id)
-    departmentNames = allDepts.map(d => ({ id: d.id, name: d.name }))
+    departmentIds = allDepts.map((d) => d.id)
+    departmentNames = allDepts.map((d) => ({ id: d.id, name: d.name }))
   } else {
     const moderatedDepts = await getMyModeratedDepartments()
     if (moderatedDepts.length === 0) {
       throw new Error('No audit access')
     }
-    departmentIds = moderatedDepts.map(d => d.id)
+    departmentIds = moderatedDepts.map((d) => d.id)
     departmentNames = moderatedDepts
   }
 
-  const supabase = await createSupabaseServiceClient()
+  const [stats, recentSessions, certificates, memberRoles, pendingJoinRequests] =
+    await Promise.all([
+      computeStats(orgId, departmentIds),
+      buildRecentSessions(orgId, departmentIds),
+      buildCertificates(departmentIds),
+      auditDb.listDepartmentMemberRoles(departmentIds),
+      auditDb.countPendingJoinRequestsForDepartments(departmentIds),
+    ])
 
-  // Run all queries in parallel
-  const [
-    statsResult,
-    sessionsResult,
-    certificatesResult,
-    membersResult,
-    joinRequestsResult,
-  ] = await Promise.all([
-    // Stats queries
-    getStats(supabase, departmentIds, orgId),
-    // Recent sessions
-    getRecentSessions(supabase, departmentIds, orgId),
-    // Certificate registry
-    getCertificates(supabase, departmentIds),
-    // Member counts
-    getMemberCounts(supabase, departmentIds),
-    // Pending join requests
-    getPendingJoinRequests(supabase, departmentIds),
-  ])
+  const memberSummary: AuditMemberSummary = {
+    totalMembers: memberRoles.length,
+    admins: memberRoles.filter(
+      (m) => m.role === 'department_admin' || m.role === 'org_admin'
+    ).length,
+    faculty: memberRoles.filter((m) => m.role === 'faculty').length,
+    trainees: memberRoles.filter((m) => m.role === 'trainee').length,
+    pendingJoinRequests,
+  }
 
   return {
-    stats: statsResult,
-    recentSessions: sessionsResult,
-    certificates: certificatesResult,
-    memberSummary: {
-      ...membersResult,
-      pendingJoinRequests: joinRequestsResult,
-    },
+    stats,
+    recentSessions,
+    certificates,
+    memberSummary,
     departmentNames,
   }
 }
 
-async function getStats(
-  supabase: any,
-  departmentIds: string[],
-  orgId: string
+async function computeStats(
+  orgId: string,
+  departmentIds: string[]
 ): Promise<AuditSummaryStats> {
-  // Get session IDs for these departments
-  const { data: sessions } = await supabase
-    .from('sessions')
-    .select('id')
-    .in('department_id', departmentIds)
-    .eq('org_id', orgId)
-    .eq('status', 'PUBLISHED')
-
-  const sessionIds = (sessions || []).map((s: any) => s.id)
+  const sessionIds = await auditDb.listPublishedSessionIds(orgId, departmentIds)
   const totalSessions = sessionIds.length
 
-  if (sessionIds.length === 0) {
+  if (totalSessions === 0) {
     return {
       totalSessions: 0,
       averageAttendanceRate: 0,
@@ -135,102 +135,68 @@ async function getStats(
     }
   }
 
-  // Parallel: attendance rate, avg feedback, certificate count
-  const [attendanceData, feedbackData, certCount] = await Promise.all([
-    supabase
-      .from('attendance')
-      .select('status')
-      .in('session_id', sessionIds),
-    supabase
-      .from('session_feedback')
-      .select('rating')
-      .in('session_id', sessionIds),
-    supabase
-      .from('certificates')
-      .select('id', { count: 'exact', head: true })
-      .in('department_id', departmentIds),
+  const [attendance, feedback, certificatesIssued] = await Promise.all([
+    auditDb.listAttendanceStatusesForSessions(sessionIds),
+    auditDb.listFeedbackRatingsForSessions(sessionIds),
+    auditDb.countCertificatesForDepartments(departmentIds),
   ])
 
-  const attendanceRecords = attendanceData.data || []
-  const presentCount = attendanceRecords.filter(
-    (a: any) => a.status === 'PRESENT' || a.status === 'LATE'
+  const presentCount = attendance.filter(
+    (a) => a.status === 'PRESENT' || a.status === 'LATE'
   ).length
   const attendanceRate =
-    attendanceRecords.length > 0
-      ? Math.round((presentCount / attendanceRecords.length) * 100)
-      : 0
+    attendance.length > 0 ? Math.round((presentCount / attendance.length) * 100) : 0
 
-  const feedbackRecords = feedbackData.data || []
+  const ratings = feedback
+    .map((f) => f.rating)
+    .filter((r): r is number => typeof r === 'number')
   const avgRating =
-    feedbackRecords.length > 0
-      ? Math.round(
-          (feedbackRecords.reduce((sum: number, f: any) => sum + f.rating, 0) /
-            feedbackRecords.length) *
-            10
-        ) / 10
+    ratings.length > 0
+      ? Math.round((ratings.reduce((sum, r) => sum + r, 0) / ratings.length) * 10) / 10
       : 0
 
   return {
     totalSessions,
     averageAttendanceRate: attendanceRate,
     averageFeedbackRating: avgRating,
-    certificatesIssued: certCount.count || 0,
+    certificatesIssued,
   }
 }
 
-async function getRecentSessions(
-  supabase: any,
-  departmentIds: string[],
-  orgId: string
+async function buildRecentSessions(
+  orgId: string,
+  departmentIds: string[]
 ): Promise<AuditSessionRow[]> {
-  const { data: sessions } = await supabase
-    .from('sessions')
-    .select('id, title, date_start, status, department_id, attendance_locked, departments:department_id (name)')
-    .in('department_id', departmentIds)
-    .eq('org_id', orgId)
-    .eq('status', 'PUBLISHED')
-    .order('date_start', { ascending: false })
-    .limit(15)
+  const sessions = await auditDb.listRecentPublishedSessions(orgId, departmentIds)
+  if (sessions.length === 0) return []
 
-  if (!sessions || sessions.length === 0) return []
+  const sessionIds = sessions.map((s) => s.id)
 
-  const sessionIds = sessions.map((s: any) => s.id)
-
-  // Batch fetch attendance, feedback, and certificate counts
-  const [attendanceData, feedbackData, certData] = await Promise.all([
-    supabase
-      .from('attendance')
-      .select('session_id, status')
-      .in('session_id', sessionIds),
-    supabase
-      .from('session_feedback')
-      .select('session_id, rating')
-      .in('session_id', sessionIds),
-    supabase
-      .from('certificates')
-      .select('session_id')
-      .in('session_id', sessionIds),
+  const [attendance, feedback, certificates] = await Promise.all([
+    auditDb.listAttendanceStatusesForSessions(sessionIds),
+    auditDb.listFeedbackRatingsForSessions(sessionIds),
+    auditDb.listCertificateSessionIds(sessionIds),
   ])
 
-  // Group by session_id
-  const attendanceBySession = groupBy(attendanceData.data || [], 'session_id')
-  const feedbackBySession = groupBy(feedbackData.data || [], 'session_id')
-  const certsBySession = groupBy(certData.data || [], 'session_id')
+  const attendanceBySession = groupBy(attendance, 'session_id')
+  const feedbackBySession = groupBy(feedback, 'session_id')
+  const certsBySession = groupBy(certificates, 'session_id')
 
-  return sessions.map((s: any) => {
+  return sessions.map((s) => {
     const att = attendanceBySession[s.id] || []
     const fb = feedbackBySession[s.id] || []
     const certs = certsBySession[s.id] || []
 
     const presentCount = att.filter(
-      (a: any) => a.status === 'PRESENT' || a.status === 'LATE'
+      (a) => a.status === 'PRESENT' || a.status === 'LATE'
     ).length
 
+    const ratings = fb
+      .map((f) => f.rating)
+      .filter((r): r is number => typeof r === 'number')
     const avgRating =
-      fb.length > 0
-        ? Math.round(
-            (fb.reduce((sum: number, f: any) => sum + f.rating, 0) / fb.length) * 10
-          ) / 10
+      ratings.length > 0
+        ? Math.round((ratings.reduce((sum, r) => sum + r, 0) / ratings.length) * 10) / 10
         : null
 
     return {
@@ -238,99 +204,56 @@ async function getRecentSessions(
       title: s.title,
       dateStart: s.date_start,
       status: s.status,
-      departmentName: s.departments?.name || 'Unknown',
+      departmentName: s.department_name,
       attendancePresent: presentCount,
       attendanceTotal: att.length,
       feedbackCount: fb.length,
       averageRating: avgRating,
       certificatesIssued: certs.length,
-      attendanceLocked: s.attendance_locked || false,
+      attendanceLocked: s.attendance_locked,
     }
   })
 }
 
-async function getCertificates(
-  supabase: any,
+async function buildCertificates(
   departmentIds: string[]
 ): Promise<AuditCertificateRow[]> {
-  const { data } = await supabase
-    .from('certificates')
-    .select(
-      'id, recipient_name, certificate_role, certificate_code, issued_at, user_id, sessions:session_id (title), departments:department_id (name)'
-    )
-    .in('department_id', departmentIds)
-    .order('issued_at', { ascending: false })
+  const rows = await auditDb.listCertificatesForDepartments(departmentIds)
 
-  if (!data) return []
-
-  // For certificates with user_id but no recipient_name, try to get email
-  const userIds = data
-    .filter((c: any) => c.user_id && !c.recipient_name)
-    .map((c: any) => c.user_id)
+  // Resolve emails for certificates that have a user_id but no recipient_name.
+  // This sits on the auth plane (GoTrue admin API) so it stays on a direct
+  // Supabase client until the auth provider swap.
+  const userIds = rows
+    .filter((c) => c.user_id && !c.recipient_name)
+    .map((c) => c.user_id as string)
 
   let userEmails: Record<string, string> = {}
   if (userIds.length > 0) {
-    const uniqueUserIds = [...new Set(userIds)] as string[]
+    const uniqueUserIds = Array.from(new Set(userIds))
+    const supabase = await createSupabaseServiceClient()
     const results = await Promise.all(
-      uniqueUserIds.map(async (uid: string) => {
+      uniqueUserIds.map(async (uid) => {
         const { data: userData } = await supabase.auth.admin.getUserById(uid)
         return { id: uid, email: userData?.user?.email || null }
       })
     )
-    userEmails = results.reduce((acc: Record<string, string>, u) => {
-      if (u.email) acc[u.id] = u.email
-      return acc
-    }, {})
+    userEmails = results.reduce(
+      (acc, u) => {
+        if (u.email) acc[u.id] = u.email
+        return acc
+      },
+      {} as Record<string, string>
+    )
   }
 
-  return data.map((c: any) => ({
+  return rows.map((c) => ({
     id: c.id,
-    recipientName: c.recipient_name || null,
-    recipientEmail: c.user_id ? (userEmails[c.user_id] || null) : null,
-    sessionTitle: c.sessions?.title || 'Unknown',
-    departmentName: c.departments?.name || 'Unknown',
+    recipientName: c.recipient_name,
+    recipientEmail: c.user_id ? userEmails[c.user_id] || null : null,
+    sessionTitle: c.session_title,
+    departmentName: c.department_name,
     certificateRole: c.certificate_role,
     certificateCode: c.certificate_code,
     issuedAt: c.issued_at,
   }))
-}
-
-async function getMemberCounts(
-  supabase: any,
-  departmentIds: string[]
-): Promise<Omit<AuditMemberSummary, 'pendingJoinRequests'>> {
-  const { data } = await supabase
-    .from('department_members')
-    .select('role')
-    .in('department_id', departmentIds)
-
-  const members = data || []
-  return {
-    totalMembers: members.length,
-    admins: members.filter((m: any) => m.role === 'department_admin' || m.role === 'org_admin').length,
-    faculty: members.filter((m: any) => m.role === 'faculty').length,
-    trainees: members.filter((m: any) => m.role === 'trainee').length,
-  }
-}
-
-async function getPendingJoinRequests(
-  supabase: any,
-  departmentIds: string[]
-): Promise<number> {
-  const { count } = await supabase
-    .from('department_join_requests')
-    .select('id', { count: 'exact', head: true })
-    .in('department_id', departmentIds)
-    .eq('status', 'PENDING')
-
-  return count || 0
-}
-
-function groupBy<T extends Record<string, any>>(arr: T[], key: string): Record<string, T[]> {
-  return arr.reduce((acc, item) => {
-    const k = item[key]
-    if (!acc[k]) acc[k] = []
-    acc[k].push(item)
-    return acc
-  }, {} as Record<string, T[]>)
 }

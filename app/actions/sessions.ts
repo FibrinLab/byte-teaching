@@ -1,9 +1,14 @@
 'use server'
 
-import { createSupabaseClient } from '@/lib/supabase/server'
-import { requireAuth, requireDepartmentModerator, requireOrg } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
-import type { Session, LocationType, SessionStatus } from '@/lib/types'
+import { requireAuth, requireDepartmentModerator, requireOrg } from '@/lib/auth'
+import {
+  assertSessionCanBePublished,
+  assertValidSessionDates,
+} from '@/lib/session-validation'
+import type { LocationType, Session, SessionStatus } from '@/lib/types'
+import * as sessionsDb from '@/lib/db/sessions'
+import { DbNotFoundError } from '@/lib/db'
 
 export async function createSession(sessionData: {
   department_id: string
@@ -16,30 +21,18 @@ export async function createSession(sessionData: {
   const userId = await requireAuth()
   const orgId = await requireOrg()
   await requireDepartmentModerator(sessionData.department_id)
-  const supabase = await createSupabaseClient()
+  assertValidSessionDates(sessionData.date_start, sessionData.date_end)
 
-  const { data: session, error: sessionError } = await supabase
-    .from('sessions')
-    .insert({
-      org_id: orgId,
-      department_id: sessionData.department_id,
-      title: sessionData.title,
-      description: sessionData.description || null,
-      date_start: sessionData.date_start,
-      date_end: sessionData.date_end,
-      location_type: sessionData.location_type,
-      teams_meeting_url: null,
-      status: 'DRAFT',
-      tags: null,
-      capacity: null,
-      created_by: userId,
-    })
-    .select()
-    .single()
-
-  if (sessionError) {
-    throw new Error(`Failed to create session: ${sessionError.message}`)
-  }
+  const session = await sessionsDb.insertSession({
+    orgId,
+    departmentId: sessionData.department_id,
+    title: sessionData.title,
+    description: sessionData.description ?? null,
+    dateStart: sessionData.date_start,
+    dateEnd: sessionData.date_end,
+    locationType: sessionData.location_type,
+    createdBy: userId,
+  })
 
   revalidatePath('/dashboard')
   revalidatePath(`/departments/${sessionData.department_id}/sessions`)
@@ -47,84 +40,45 @@ export async function createSession(sessionData: {
 }
 
 export async function getSessionsForOrg(orgId: string, departmentId?: string) {
-  const supabase = await createSupabaseClient()
-
-  let query = supabase
-    .from('sessions')
-    .select('*')
-    .eq('org_id', orgId)
-    .order('date_start', { ascending: true })
-
-  if (departmentId) {
-    query = query.eq('department_id', departmentId)
-  }
-
-  const { data, error } = await query
-
-  if (error) {
-    throw new Error(`Failed to fetch sessions: ${error.message}`)
-  }
-
-  return data || []
+  return sessionsDb.listSessionsByOrg(orgId, { departmentId })
 }
 
 export async function getSessions(departmentId?: string) {
   const orgId = await requireOrg()
-  return getSessionsForOrg(orgId, departmentId)
+  return sessionsDb.listSessionsByOrg(orgId, { departmentId })
 }
 
 export async function getSession(id: string) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
-
-  const { data, error } = await supabase
-    .from('sessions')
-    .select('*')
-    .eq('id', id)
-    .eq('org_id', orgId)
-    .single()
-
-  if (error) {
-    throw new Error(`Failed to fetch session: ${error.message}`)
-  }
-
-  return data
+  return sessionsDb.getSessionOrThrow(id, orgId)
 }
 
 export async function updateSession(id: string, updates: Partial<Session>) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  // Get session to check permissions
-  const { data: session } = await supabase
-    .from('sessions')
-    .select('department_id')
-    .eq('id', id)
-    .eq('org_id', orgId)
-    .single()
-
-  if (!session) {
-    throw new Error('Session not found')
+  const scope = await sessionsDb.findSessionScope(id, orgId)
+  if (!scope) {
+    throw new DbNotFoundError('Session not found')
   }
 
-  await requireDepartmentModerator(session.department_id)
+  await requireDepartmentModerator(scope.department_id)
 
-  const { data, error } = await supabase
-    .from('sessions')
-    .update(updates)
-    .eq('id', id)
-    .eq('org_id', orgId)
-    .select()
-    .single()
+  const nextDateStart = updates.date_start ?? scope.date_start
+  const nextDateEnd = updates.date_end ?? scope.date_end
+  const nextStatus = updates.status ?? scope.status
 
-  if (error) {
-    throw new Error(`Failed to update session: ${error.message}`)
+  assertValidSessionDates(nextDateStart, nextDateEnd)
+
+  if (nextStatus === 'PUBLISHED') {
+    assertSessionCanBePublished(nextDateEnd)
   }
+
+  const session = await sessionsDb.updateSessionById(id, orgId, updates)
 
   revalidatePath(`/sessions/${id}`)
   revalidatePath(`/sessions/${id}/manage`)
   revalidatePath('/dashboard')
-  return data
+  return session
 }
 
 export async function updateSessionMeetingUrl(sessionId: string, meetingUrl: string) {
@@ -137,81 +91,41 @@ export async function updateSessionStatus(sessionId: string, status: SessionStat
 
 export async function addSessionTeacher(sessionId: string, userId: string) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  // Get session to check permissions
-  const { data: session } = await supabase
-    .from('sessions')
-    .select('department_id')
-    .eq('id', sessionId)
-    .eq('org_id', orgId)
-    .single()
-
-  if (!session) {
-    throw new Error('Session not found')
+  const scope = await sessionsDb.findSessionScope(sessionId, orgId)
+  if (!scope) {
+    throw new DbNotFoundError('Session not found')
   }
 
-  await requireDepartmentModerator(session.department_id)
+  await requireDepartmentModerator(scope.department_id)
 
-  // Verify user is a member of the department
-  const { data: member } = await supabase
-    .from('department_members')
-    .select('id')
-    .eq('department_id', session.department_id)
-    .eq('user_id', userId)
-    .single()
-
-  if (!member) {
+  const isMember = await sessionsDb.isDepartmentMember(scope.department_id, userId)
+  if (!isMember) {
     throw new Error('User is not a member of this department')
   }
 
-  const { data, error } = await supabase
-    .from('session_teachers')
-    .insert({
-      org_id: orgId,
-      session_id: sessionId,
-      user_id: userId,
-    })
-    .select()
-    .single()
-
-  if (error) {
-    throw new Error(`Failed to add teacher: ${error.message}`)
-  }
+  const teacher = await sessionsDb.insertSessionTeacher({
+    orgId,
+    sessionId,
+    userId,
+  })
 
   revalidatePath(`/sessions/${sessionId}/manage`)
   revalidatePath(`/sessions/${sessionId}`)
-  return data
+  return teacher
 }
 
 export async function removeSessionTeacher(sessionId: string, userId: string) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  // Get session to check permissions
-  const { data: session } = await supabase
-    .from('sessions')
-    .select('department_id')
-    .eq('id', sessionId)
-    .eq('org_id', orgId)
-    .single()
-
-  if (!session) {
-    throw new Error('Session not found')
+  const scope = await sessionsDb.findSessionScope(sessionId, orgId)
+  if (!scope) {
+    throw new DbNotFoundError('Session not found')
   }
 
-  await requireDepartmentModerator(session.department_id)
+  await requireDepartmentModerator(scope.department_id)
 
-  const { error } = await supabase
-    .from('session_teachers')
-    .delete()
-    .eq('session_id', sessionId)
-    .eq('user_id', userId)
-    .eq('org_id', orgId)
-
-  if (error) {
-    throw new Error(`Failed to remove teacher: ${error.message}`)
-  }
+  await sessionsDb.deleteSessionTeacher({ orgId, sessionId, userId })
 
   revalidatePath(`/sessions/${sessionId}/manage`)
   revalidatePath(`/sessions/${sessionId}`)
@@ -220,45 +134,29 @@ export async function removeSessionTeacher(sessionId: string, userId: string) {
 
 export async function deleteSession(sessionId: string) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  const { data: session, error: sessionError } = await supabase
-    .from('sessions')
-    .select('id, department_id')
-    .eq('id', sessionId)
-    .eq('org_id', orgId)
-    .single()
-
-  if (sessionError || !session) {
-    throw new Error('Session not found')
+  const scope = await sessionsDb.findSessionScope(sessionId, orgId)
+  if (!scope) {
+    throw new DbNotFoundError('Session not found')
   }
 
-  await requireDepartmentModerator(session.department_id)
+  await requireDepartmentModerator(scope.department_id)
 
-  const { error } = await supabase
-    .from('sessions')
-    .delete()
-    .eq('id', sessionId)
-    .eq('org_id', orgId)
-
-  if (error) {
-    throw new Error(`Failed to delete session: ${error.message}`)
-  }
+  await sessionsDb.deleteSessionById(sessionId, orgId)
 
   revalidatePath('/dashboard')
-  revalidatePath(`/departments/${session.department_id}/sessions`)
+  revalidatePath(`/departments/${scope.department_id}/sessions`)
   return { success: true }
 }
 
 export async function getCalendarSubscriptionUrl(orgId: string, departmentId?: string) {
-
   // Compute a simple token to prevent URL enumeration
   const secret = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
   let hash = 0
   const str = orgId + secret
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
+    hash = (hash << 5) - hash + char
     hash = hash & hash
   }
   const token = Math.abs(hash).toString(16)
@@ -273,17 +171,5 @@ export async function getCalendarSubscriptionUrl(orgId: string, departmentId?: s
 
 export async function getSessionTeachers(sessionId: string) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
-
-  const { data, error } = await supabase
-    .from('session_teachers')
-    .select('*')
-    .eq('org_id', orgId)
-    .eq('session_id', sessionId)
-
-  if (error) {
-    throw new Error(`Failed to fetch teachers: ${error.message}`)
-  }
-
-  return data || []
+  return sessionsDb.listSessionTeachers(orgId, sessionId)
 }

@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import QRCode from 'qrcode'
+import { useToast } from '@/components/ToastProvider'
 
 interface FeedbackQRCodePanelProps {
   sessionId: string
 }
 
 export function FeedbackQRCodePanel({ sessionId }: FeedbackQRCodePanelProps) {
+  const { showToast } = useToast()
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('')
   const [loading, setLoading] = useState(true)
 
@@ -31,9 +33,21 @@ export function FeedbackQRCodePanel({ sessionId }: FeedbackQRCodePanelProps) {
     generateQRCode()
   }, [feedbackUrl])
 
-  function copyToClipboard() {
-    navigator.clipboard.writeText(feedbackUrl)
-    alert('Feedback link copied to clipboard!')
+  async function copyToClipboard() {
+    try {
+      await navigator.clipboard.writeText(feedbackUrl)
+      showToast({
+        variant: 'success',
+        title: 'Feedback link copied',
+        description: 'You can now share the session feedback link.',
+      })
+    } catch (error) {
+      showToast({
+        variant: 'error',
+        title: 'Copy failed',
+        description: error instanceof Error ? error.message : 'Could not copy the feedback link.',
+      })
+    }
   }
 
   return (

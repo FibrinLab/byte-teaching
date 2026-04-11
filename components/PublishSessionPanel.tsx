@@ -3,32 +3,53 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from './Button'
+import { useToast } from './ToastProvider'
 import { updateSessionStatus } from '@/app/actions/sessions'
+import { getSessionPublishBlockReason } from '@/lib/session-validation'
 import type { SessionStatus } from '@/lib/types'
 
 interface PublishSessionPanelProps {
   sessionId: string
   currentStatus: SessionStatus
+  dateEnd: string
 }
 
-export function PublishSessionPanel({ sessionId, currentStatus }: PublishSessionPanelProps) {
+export function PublishSessionPanel({
+  sessionId,
+  currentStatus,
+  dateEnd,
+}: PublishSessionPanelProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const publishBlockedReason = getSessionPublishBlockReason(dateEnd)
 
   async function handleStatusChange(newStatus: SessionStatus) {
+    if (newStatus === 'PUBLISHED' && publishBlockedReason) {
+      showToast({
+        variant: 'error',
+        title: 'Cannot publish session',
+        description: publishBlockedReason,
+      })
+      return
+    }
+
     setLoading(true)
-    setError(null)
-    setSuccess(false)
 
     try {
       await updateSessionStatus(sessionId, newStatus)
-      setSuccess(true)
+      showToast({
+        variant: 'success',
+        title: 'Session updated',
+        description: `Session status is now ${newStatus}.`,
+      })
       router.refresh()
-      setTimeout(() => setSuccess(false), 3000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update status')
+      showToast({
+        variant: 'error',
+        title: 'Failed to update session',
+        description: err instanceof Error ? err.message : 'Failed to update status',
+      })
     } finally {
       setLoading(false)
     }
@@ -36,18 +57,6 @@ export function PublishSessionPanel({ sessionId, currentStatus }: PublishSession
 
   return (
     <div className="space-y-4">
-      {error && (
-        <div className="p-4 border border-red-500 bg-red-50">
-          <p className="font-mono text-sm text-red-800">{error}</p>
-        </div>
-      )}
-
-      {success && (
-        <div className="p-4 border border-green-500 bg-green-50">
-          <p className="font-mono text-sm text-green-800">Status updated successfully!</p>
-        </div>
-      )}
-
       <div>
         <p className="font-mono text-sm mb-4">
           Current status: <strong>{currentStatus}</strong>
@@ -55,13 +64,18 @@ export function PublishSessionPanel({ sessionId, currentStatus }: PublishSession
         <p className="font-mono text-sm text-gray-600 mb-4">
           Published sessions are visible to all department members. Draft sessions are only visible to moderators.
         </p>
+        {publishBlockedReason ? (
+          <p className="font-mono text-sm text-gray-600">
+            This session has already ended, so it can stay as draft or be cancelled, but it can no longer be published.
+          </p>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-3">
         <Button
           type="button"
           onClick={() => handleStatusChange('PUBLISHED')}
-          disabled={loading || currentStatus === 'PUBLISHED'}
+          disabled={loading || currentStatus === 'PUBLISHED' || !!publishBlockedReason}
         >
           {loading ? 'Updating...' : 'Publish Session'}
         </Button>

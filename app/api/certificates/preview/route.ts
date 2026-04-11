@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createSupabaseClient } from '@/lib/supabase/server'
 import { requireAuth, requireOrg, requireDepartmentModerator } from '@/lib/auth'
 import { generateCertificatePDF } from '@/lib/certificates/pdf'
+import * as departmentsDb from '@/lib/db/departments'
+import * as organizationsDb from '@/lib/db/organizations'
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,25 +16,15 @@ export async function GET(request: NextRequest) {
 
     await requireDepartmentModerator(departmentId)
 
-    const supabase = await createSupabaseClient()
-
-    // Fetch department and org info
-    const { data: dept } = await supabase
-      .from('departments')
-      .select('name, lead_name')
-      .eq('id', departmentId)
-      .single()
-
-    const { data: org } = await supabase
-      .from('organizations')
-      .select('name')
-      .eq('id', orgId)
-      .single()
+    const [dept, orgName] = await Promise.all([
+      departmentsDb.findDepartmentNameAndLead(departmentId),
+      organizationsDb.findOrganizationName(orgId),
+    ])
 
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.nextUrl.origin
 
     const pdfBuffer = await generateCertificatePDF({
-      orgName: org?.name || 'Organization',
+      orgName: orgName || 'Organization',
       departmentName: dept?.name || 'Department',
       sessionTitle: 'Sample Session',
       sessionDate: new Date().toLocaleDateString(),
@@ -45,7 +36,7 @@ export async function GET(request: NextRequest) {
       leadName: dept?.lead_name || undefined,
     })
 
-    return new NextResponse(pdfBuffer as any, {
+    return new NextResponse(pdfBuffer as unknown as BodyInit, {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': 'inline; filename="certificate-preview.pdf"',
@@ -53,7 +44,9 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to generate preview' },
+      {
+        error: error instanceof Error ? error.message : 'Failed to generate preview',
+      },
       { status: 500 }
     )
   }

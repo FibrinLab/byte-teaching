@@ -1,9 +1,16 @@
 'use server'
 
-import { createSupabaseClient, createSupabaseServiceClient } from '@/lib/supabase/server'
-import { requireAuth, getCurrentUser, isSuperAdmin, isDepartmentModerator } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
+import {
+  requireAuth,
+  getCurrentUser,
+  isSuperAdmin,
+  isDepartmentModerator,
+} from '@/lib/auth'
 import type { UserRole } from '@/lib/types'
+import * as joinRequestsDb from '@/lib/db/join-requests'
+import * as onboardingDb from '@/lib/db/onboarding'
+import { DbNotFoundError } from '@/lib/db'
 
 export async function createDepartmentJoinRequest(
   orgId: string,
@@ -12,143 +19,72 @@ export async function createDepartmentJoinRequest(
 ) {
   const userId = await requireAuth()
   const user = await getCurrentUser()
-  const supabase = await createSupabaseClient()
 
-  const { data, error } = await supabase
-    .from('department_join_requests')
-    .insert({
-      org_id: orgId,
-      department_id: departmentId,
-      user_id: userId,
-      user_email: user?.email || '',
-      requested_role: requestedRole,
-      status: 'PENDING',
-    })
-    .select()
-    .single()
-
-  if (error) {
-    throw new Error(`Failed to create join request: ${error.message}`)
-  }
+  const request = await joinRequestsDb.insertDepartmentJoinRequest({
+    orgId,
+    departmentId,
+    userId,
+    userEmail: user?.email || '',
+    requestedRole,
+  })
 
   revalidatePath('/admin')
-  return data
+  return request
 }
 
 export async function getPendingDepartmentJoinRequests() {
-  const supabase = await createSupabaseClient()
-
-  const { data, error } = await supabase
-    .from('department_join_requests')
-    .select('*, departments:department_id (id, name), organizations:org_id (id, name)')
-    .eq('status', 'PENDING')
-    .order('created_at', { ascending: true })
-
-  if (error) {
-    throw new Error(`Failed to fetch join requests: ${error.message}`)
-  }
-
-  return data || []
+  return joinRequestsDb.listPendingJoinRequests()
 }
 
 export async function getAllPendingDepartmentJoinRequests() {
-  const supabase = await createSupabaseServiceClient()
-
-  const { data, error } = await supabase
-    .from('department_join_requests')
-    .select('*, departments:department_id (id, name), organizations:org_id (id, name)')
-    .eq('status', 'PENDING')
-    .order('created_at', { ascending: true })
-
-  if (error) {
-    throw new Error(`Failed to fetch join requests: ${error.message}`)
-  }
-
-  return data || []
+  return joinRequestsDb.listPendingJoinRequests({ service: true })
 }
 
-export async function approveDepartmentJoinRequest(requestId: string, role: UserRole = 'trainee') {
+export async function approveDepartmentJoinRequest(
+  requestId: string,
+  role: UserRole = 'trainee'
+) {
   const userId = await requireAuth()
-  const supabase = await createSupabaseServiceClient()
 
-  const { data: request, error: requestError } = await supabase
-    .from('department_join_requests')
-    .select('*')
-    .eq('id', requestId)
-    .single()
-
-  if (requestError || !request) {
-    throw new Error('Join request not found')
+  const request = await joinRequestsDb.findJoinRequest(requestId)
+  if (!request) {
+    throw new DbNotFoundError('Join request not found')
   }
 
   if (request.status !== 'PENDING') {
     throw new Error('Join request already processed')
   }
 
-  const allowed = (await isSuperAdmin()) || (await isDepartmentModerator(request.department_id))
+  const allowed =
+    (await isSuperAdmin()) || (await isDepartmentModerator(request.department_id))
   if (!allowed) {
     throw new Error('Not authorized to approve this request')
   }
 
-  const { error: updateError } = await supabase
-    .from('department_join_requests')
-    .update({
-      status: 'APPROVED',
-      decided_at: new Date().toISOString(),
-      decided_by: userId,
-    })
-    .eq('id', requestId)
+  await joinRequestsDb.updateJoinRequestStatus({
+    id: requestId,
+    status: 'APPROVED',
+    decidedBy: userId,
+  })
 
-  if (updateError) {
-    throw new Error(`Failed to approve join request: ${updateError.message}`)
-  }
+  const resolvedRole = role || request.requested_role || 'trainee'
 
-  const requestedRole = role || request.requested_role || 'trainee'
+  // Clean up prior cross-org memberships so approving a request moves the
+  // user into the target org rather than leaving them straddling two.
+  await onboardingDb.deleteMembershipsInOtherOrgs(request.user_id, request.org_id)
 
-  const { error: cleanupDeptError } = await supabase
-    .from('department_members')
-    .delete()
-    .eq('user_id', request.user_id)
-    .neq('org_id', request.org_id)
+  await onboardingDb.upsertOrganizationMember({
+    orgId: request.org_id,
+    userId: request.user_id,
+    role: resolvedRole,
+  })
 
-  if (cleanupDeptError) {
-    throw new Error(`Failed to remove previous department memberships: ${cleanupDeptError.message}`)
-  }
-
-  const { error: cleanupOrgError } = await supabase
-    .from('organization_members')
-    .delete()
-    .eq('user_id', request.user_id)
-    .neq('org_id', request.org_id)
-
-  if (cleanupOrgError) {
-    throw new Error(`Failed to remove previous organization memberships: ${cleanupOrgError.message}`)
-  }
-
-  const { error: orgMemberError } = await supabase
-    .from('organization_members')
-    .upsert({
-      org_id: request.org_id,
-      user_id: request.user_id,
-      role: requestedRole,
-    }, { onConflict: 'org_id,user_id' })
-
-  if (orgMemberError) {
-    throw new Error(`Failed to add organization member: ${orgMemberError.message}`)
-  }
-
-  const { error: memberError } = await supabase
-    .from('department_members')
-    .upsert({
-      org_id: request.org_id,
-      department_id: request.department_id,
-      user_id: request.user_id,
-      role: requestedRole,
-    }, { onConflict: 'department_id,user_id' })
-
-  if (memberError) {
-    throw new Error(`Failed to add member: ${memberError.message}`)
-  }
+  await onboardingDb.upsertDepartmentMember({
+    orgId: request.org_id,
+    departmentId: request.department_id,
+    userId: request.user_id,
+    role: resolvedRole,
+  })
 
   revalidatePath('/admin')
   return { success: true }
@@ -156,69 +92,36 @@ export async function approveDepartmentJoinRequest(requestId: string, role: User
 
 export async function rejectDepartmentJoinRequest(requestId: string) {
   const userId = await requireAuth()
-  const supabase = await createSupabaseServiceClient()
 
-  const { data: request, error: requestError } = await supabase
-    .from('department_join_requests')
-    .select('*')
-    .eq('id', requestId)
-    .single()
-
-  if (requestError || !request) {
-    throw new Error('Join request not found')
+  const request = await joinRequestsDb.findJoinRequest(requestId)
+  if (!request) {
+    throw new DbNotFoundError('Join request not found')
   }
 
   if (request.status !== 'PENDING') {
     throw new Error('Join request already processed')
   }
 
-  const allowed = (await isSuperAdmin()) || (await isDepartmentModerator(request.department_id))
+  const allowed =
+    (await isSuperAdmin()) || (await isDepartmentModerator(request.department_id))
   if (!allowed) {
     throw new Error('Not authorized to reject this request')
   }
 
-  const { error: updateError } = await supabase
-    .from('department_join_requests')
-    .update({
-      status: 'REJECTED',
-      decided_at: new Date().toISOString(),
-      decided_by: userId,
-    })
-    .eq('id', requestId)
-
-  if (updateError) {
-    throw new Error(`Failed to reject join request: ${updateError.message}`)
-  }
+  await joinRequestsDb.updateJoinRequestStatus({
+    id: requestId,
+    status: 'REJECTED',
+    decidedBy: userId,
+  })
 
   revalidatePath('/admin')
   return { success: true }
 }
 
 export async function getOrganizationsForJoin() {
-  const supabase = await createSupabaseClient()
-  const { data, error } = await supabase
-    .from('organizations')
-    .select('id, name')
-    .order('name')
-
-  if (error) {
-    throw new Error(`Failed to fetch organizations: ${error.message}`)
-  }
-
-  return data || []
+  return joinRequestsDb.listOrganizationsForJoin()
 }
 
 export async function getDepartmentsForOrg(orgId: string) {
-  const supabase = await createSupabaseClient()
-  const { data, error } = await supabase
-    .from('departments')
-    .select('id, name, org_id')
-    .eq('org_id', orgId)
-    .order('name')
-
-  if (error) {
-    throw new Error(`Failed to fetch departments: ${error.message}`)
-  }
-
-  return data || []
+  return joinRequestsDb.listDepartmentsForJoin(orgId)
 }

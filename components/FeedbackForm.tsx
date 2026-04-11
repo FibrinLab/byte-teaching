@@ -1,91 +1,124 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button } from './Button'
 import { Input } from './Input'
+import { Select } from './Select'
 import { Textarea } from './Textarea'
+import { useToast } from './ToastProvider'
+import { FEEDBACK_RATING_OPTIONS } from '@/lib/feedback-form'
+import type { DepartmentFeedbackField, FeedbackAnswerInput } from '@/lib/types'
 import { submitFeedback } from '@/app/actions/feedback'
 
 interface FeedbackFormProps {
   sessionId: string
   sessionTitle: string
+  feedbackFields: DepartmentFeedbackField[]
 }
 
-export function FeedbackForm({ sessionId, sessionTitle }: FeedbackFormProps) {
+type AnswerState = Record<string, { value: string; comment: string }>
+
+function buildInitialAnswerState(feedbackFields: DepartmentFeedbackField[]) {
+  return feedbackFields.reduce<AnswerState>((state, field) => {
+    state[field.id] = {
+      value: '',
+      comment: '',
+    }
+    return state
+  }, {})
+}
+
+export function FeedbackForm({ sessionId, sessionTitle, feedbackFields }: FeedbackFormProps) {
+  const { showToast } = useToast()
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
-  const [rating, setRating] = useState<number | null>(null)
-  const [comment, setComment] = useState('')
+  const initialAnswerState = useMemo(() => buildInitialAnswerState(feedbackFields), [feedbackFields])
+  const [answers, setAnswers] = useState<AnswerState>(initialAnswerState)
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
+  function updateAnswer(fieldId: string, patch: Partial<{ value: string; comment: string }>) {
+    setAnswers((currentAnswers) => ({
+      ...currentAnswers,
+      [fieldId]: {
+        ...currentAnswers[fieldId],
+        ...patch,
+      },
+    }))
+  }
 
-    if (!firstName.trim() || !lastName.trim() || !email.trim()) {
-      setError('Please fill in your name and email')
+  const hasMissingIdentity = !firstName.trim() || !lastName.trim() || !email.trim()
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (hasMissingIdentity) {
+      showToast({
+        variant: 'error',
+        title: 'Missing attendee details',
+        description: 'Please fill in your first name, last name, and email address.',
+      })
       return
     }
 
-    if (!rating) {
-      setError('Please select a rating')
-      return
-    }
+    const structuredAnswers: FeedbackAnswerInput[] = feedbackFields.map((field) => ({
+      fieldId: field.id,
+      value: answers[field.id]?.value?.trim() || undefined,
+      comment: answers[field.id]?.comment?.trim() || undefined,
+    }))
 
     setLoading(true)
-    setError(null)
-    setSuccess(false)
 
     try {
       await submitFeedback(sessionId, {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
-        rating,
-        comment: comment.trim() || undefined,
+        answers: structuredAnswers,
       })
-      setSuccess(true)
+
+      showToast({
+        variant: 'success',
+        title: 'Feedback submitted',
+        description: `Your attendance for ${sessionTitle} has been recorded.`,
+      })
+
       setFirstName('')
       setLastName('')
       setEmail('')
-      setRating(null)
-      setComment('')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to submit feedback')
+      setAnswers(buildInitialAnswerState(feedbackFields))
+    } catch (error) {
+      showToast({
+        variant: 'error',
+        title: 'Submission failed',
+        description: error instanceof Error ? error.message : 'Failed to submit feedback',
+      })
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      {error && (
-        <div className="p-4 border border-red-500 bg-red-50">
-          <p className="font-mono text-sm text-red-800">{error}</p>
-        </div>
-      )}
+    <form onSubmit={handleSubmit} className="space-y-8">
+      <div className="space-y-3 border border-black p-4">
+        <p className="font-mono text-xs uppercase tracking-[0.22em] text-gray-500">
+          Attendance and Feedback
+        </p>
+        <p className="font-mono text-sm text-gray-600">
+          Fields marked with * are required.
+        </p>
+        <p className="font-mono text-xs text-gray-500 italic leading-6">
+          Your feedback is anonymised before it is released to teachers. Your name and email are
+          only used to issue your attendance certificate.
+        </p>
+      </div>
 
-      {success && (
-        <div className="p-4 border border-green-500 bg-green-50">
-          <p className="font-mono text-sm text-green-800">
-            Thank you for your feedback! Your attendance has been recorded.
-          </p>
-        </div>
-      )}
-
-      <p className="font-mono text-xs text-gray-500 italic">
-        Your feedback is completely anonymous — teachers will not see your name or email.
-        This information is only used to issue your attendance certificate.
-      </p>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Input
           label="First Name *"
           type="text"
           value={firstName}
-          onChange={(e) => setFirstName(e.target.value)}
+          onChange={(event) => setFirstName(event.target.value)}
           placeholder="Enter your first name"
           required
         />
@@ -93,7 +126,7 @@ export function FeedbackForm({ sessionId, sessionTitle }: FeedbackFormProps) {
           label="Last Name *"
           type="text"
           value={lastName}
-          onChange={(e) => setLastName(e.target.value)}
+          onChange={(event) => setLastName(event.target.value)}
           placeholder="Enter your last name"
           required
         />
@@ -103,51 +136,66 @@ export function FeedbackForm({ sessionId, sessionTitle }: FeedbackFormProps) {
         label="Email *"
         type="email"
         value={email}
-        onChange={(e) => setEmail(e.target.value)}
+        onChange={(event) => setEmail(event.target.value)}
         placeholder="Enter your email address"
         required
       />
 
-      <div>
-        <label className="block text-sm font-mono font-bold mb-3">
-          How would you rate this session? *
-        </label>
-        <div className="flex gap-2 sm:gap-4">
-          {[1, 2, 3, 4, 5].map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setRating(value)}
-              className={`w-12 h-12 sm:w-16 sm:h-16 border-2 font-mono text-lg sm:text-xl font-bold transition-colors ${
-                rating === value
-                  ? 'border-black bg-black text-white'
-                  : 'border-gray-400 bg-white text-black hover:border-gray-600'
-              }`}
-            >
-              {value}
-            </button>
-          ))}
-        </div>
-        <div className="flex justify-between mt-2 font-mono text-xs text-gray-600">
-          <span>Poor</span>
-          <span>Excellent</span>
-        </div>
+      <div className="space-y-6">
+        {feedbackFields.map((field) => (
+          <div key={field.id} className="space-y-3 border-t border-black pt-6 first:border-t-0 first:pt-0">
+            {field.type === 'rating' ? (
+              <>
+                <Select
+                  label={`${field.label}${field.required ? ' *' : ''}`}
+                  value={answers[field.id]?.value || ''}
+                  onChange={(event) => updateAnswer(field.id, { value: event.target.value })}
+                  required={field.required}
+                >
+                  <option value="">---</option>
+                  {FEEDBACK_RATING_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+
+                {field.commentLabel ? (
+                  <Textarea
+                    label={field.commentLabel}
+                    rows={5}
+                    value={answers[field.id]?.comment || ''}
+                    onChange={(event) => updateAnswer(field.id, { comment: event.target.value })}
+                    placeholder="Add any supporting comments..."
+                  />
+                ) : null}
+              </>
+            ) : field.type === 'textarea' ? (
+              <Textarea
+                label={`${field.label}${field.required ? ' *' : ''}`}
+                rows={6}
+                value={answers[field.id]?.value || ''}
+                onChange={(event) => updateAnswer(field.id, { value: event.target.value })}
+                placeholder={field.placeholder || 'Add your response...'}
+                required={field.required}
+              />
+            ) : (
+              <Input
+                label={`${field.label}${field.required ? ' *' : ''}`}
+                type="text"
+                value={answers[field.id]?.value || ''}
+                onChange={(event) => updateAnswer(field.id, { value: event.target.value })}
+                placeholder={field.placeholder || 'Add your response'}
+                required={field.required}
+              />
+            )}
+          </div>
+        ))}
       </div>
 
-      <Textarea
-        label="Comments (optional)"
-        name="comment"
-        rows={6}
-        value={comment}
-        onChange={(e) => setComment(e.target.value)}
-        placeholder="Share your thoughts about this session..."
-      />
-
-      <div className="flex gap-4">
-        <Button type="submit" disabled={loading || !rating || !firstName.trim() || !lastName.trim() || !email.trim()} className="w-full sm:w-auto">
-          {loading ? 'Submitting...' : 'Submit Feedback'}
-        </Button>
-      </div>
+      <Button type="submit" disabled={loading || hasMissingIdentity} className="w-full sm:w-auto">
+        {loading ? 'Submitting...' : 'Submit Feedback'}
+      </Button>
     </form>
   )
 }

@@ -1,107 +1,161 @@
 'use server'
 
-import { createSupabaseClient, createSupabaseServiceClient } from '@/lib/supabase/server'
-import { requireOrg, requireDepartmentModerator } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
+import { requireDepartmentModerator, requireOrg } from '@/lib/auth'
 import { generateCertificatePDF } from '@/lib/certificates/pdf'
 import { generateCertificateCode } from '@/lib/certificates/utils'
 import { getResendClient } from '@/lib/resend'
-import { buildCertificateEmailHtml, buildTeacherFeedbackEmailHtml } from '@/lib/email-templates'
+import {
+  buildCertificateEmailHtml,
+  buildTeacherFeedbackEmailHtml,
+} from '@/lib/email-templates'
+import {
+  buildFeedbackSubmission,
+  extractTextResponses,
+  getFeedbackSubmissionScore,
+  normalizeDepartmentFeedbackFields,
+  normalizeSubmittedFeedbackAnswers,
+} from '@/lib/feedback-form'
+import type {
+  DepartmentFeedbackField,
+  FeedbackAnswerInput,
+  SubmittedFeedbackAnswer,
+} from '@/lib/types'
+import * as feedbackDb from '@/lib/db/feedback'
+import * as sessionsDb from '@/lib/db/sessions'
+import * as certificatesDb from '@/lib/db/certificates'
+import { DbNotFoundError } from '@/lib/db'
 
 export interface FeedbackData {
   firstName: string
   lastName: string
   email: string
-  rating: number
-  comment?: string
+  answers: FeedbackAnswerInput[]
+}
+
+function getFeedbackTextResponses(feedback: feedbackDb.StoredFeedbackRow) {
+  const answers = normalizeSubmittedFeedbackAnswers(feedback.answers)
+  const textResponses = extractTextResponses(answers)
+
+  if (textResponses.length > 0) {
+    return { answers, textResponses }
+  }
+
+  if (feedback.comment && feedback.comment.trim().length > 0) {
+    return {
+      answers,
+      textResponses: [
+        {
+          label: 'Comment',
+          text: feedback.comment.trim(),
+        },
+      ],
+    }
+  }
+
+  return { answers, textResponses: [] as { label: string; text: string }[] }
+}
+
+export async function getDepartmentFeedbackFields(departmentId: string) {
+  await requireDepartmentModerator(departmentId)
+  const orgId = await requireOrg()
+
+  const raw = await feedbackDb.findDepartmentFeedbackFormFields(departmentId, orgId)
+  return normalizeDepartmentFeedbackFields(raw)
+}
+
+export async function updateDepartmentFeedbackFields(
+  departmentId: string,
+  fields: DepartmentFeedbackField[]
+) {
+  await requireDepartmentModerator(departmentId)
+  const orgId = await requireOrg()
+
+  const normalizedFields = normalizeDepartmentFeedbackFields(fields)
+  if (normalizedFields.length > 24) {
+    throw new Error('Feedback forms are limited to 24 fields.')
+  }
+
+  await feedbackDb.updateDepartmentFeedbackFormFields(
+    departmentId,
+    orgId,
+    normalizedFields
+  )
+
+  revalidatePath('/settings')
+  revalidatePath('/dashboard')
+  revalidatePath(`/departments/${departmentId}`)
+  revalidatePath(`/departments/${departmentId}/feedback`)
 }
 
 export async function submitFeedback(sessionId: string, feedback: FeedbackData) {
-  // Use service client — this is a public form, no auth required
-  const serviceClient = await createSupabaseServiceClient()
+  const firstName = feedback.firstName.trim()
+  const lastName = feedback.lastName.trim()
+  const email = feedback.email.trim().toLowerCase()
 
-  // Get session to verify it exists and is published
-  const { data: session, error: sessionError } = await serviceClient
-    .from('sessions')
-    .select('id, org_id, status, department_id')
-    .eq('id', sessionId)
-    .single()
+  if (!firstName || !lastName || !email) {
+    throw new Error('Please fill in your name and email.')
+  }
 
-  if (sessionError || !session) {
-    throw new Error('Session not found')
+  const session = await feedbackDb.findSessionForFeedbackSubmission(sessionId)
+  if (!session) {
+    throw new DbNotFoundError('Session not found')
   }
 
   if (session.status !== 'PUBLISHED') {
     throw new Error('Feedback can only be submitted for published sessions')
   }
 
-  // Save feedback with attendee info
-  const { data, error } = await serviceClient
-    .from('session_feedback')
-    .insert({
-      org_id: session.org_id,
-      session_id: sessionId,
-      rating: feedback.rating,
-      comment: feedback.comment || null,
-      is_anonymous: false,
-      attendee_first_name: feedback.firstName,
-      attendee_last_name: feedback.lastName,
-      attendee_email: feedback.email.toLowerCase(),
-    })
-    .select()
-    .single()
-
-  if (error) {
-    throw new Error(`Failed to submit feedback: ${error.message}`)
+  const department = await feedbackDb.findDepartmentForFeedbackSubmission(
+    session.department_id
+  )
+  if (!department) {
+    throw new DbNotFoundError('Department not found')
   }
 
-  // Auto-generate and email attendance certificate (non-blocking)
+  const templateFields = normalizeDepartmentFeedbackFields(
+    department.feedback_form_fields
+  )
+  const { submittedAnswers, derivedRating, derivedComment } = buildFeedbackSubmission(
+    templateFields,
+    feedback.answers || []
+  )
+
+  const inserted = await feedbackDb.insertSessionFeedback({
+    orgId: session.org_id,
+    sessionId,
+    rating: derivedRating,
+    comment: derivedComment,
+    answers: submittedAnswers,
+    firstName,
+    lastName,
+    email,
+  })
+
   try {
-    const recipientName = `${feedback.firstName} ${feedback.lastName}`
+    const recipientName = `${firstName} ${lastName}`
+    const orgName = await feedbackDb.findOrganizationName(session.org_id)
 
-    // Fetch org, department, and session details for certificate
-    const { data: sessionFull } = await serviceClient
-      .from('sessions')
-      .select('title, date_start, department_id, org_id')
-      .eq('id', sessionId)
-      .single()
-
-    const { data: org } = await serviceClient
-      .from('organizations')
-      .select('name')
-      .eq('id', session.org_id)
-      .single()
-
-    const { data: dept } = await serviceClient
-      .from('departments')
-      .select('name, lead_name')
-      .eq('id', session.department_id)
-      .single()
-
-    if (sessionFull && org && dept) {
+    if (orgName) {
       const certificateCode = generateCertificateCode()
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
       const verifyUrl = `${baseUrl}/verify/${certificateCode}`
 
-      // Create certificate record
-      await serviceClient
-        .from('certificates')
-        .insert({
-          org_id: session.org_id,
-          department_id: session.department_id,
-          session_id: sessionId,
-          user_id: null,
-          certificate_role: 'ATTENDEE',
-          certificate_code: certificateCode,
-          recipient_name: recipientName,
-        })
+      await certificatesDb.insertCertificate({
+        orgId: session.org_id,
+        departmentId: session.department_id,
+        sessionId,
+        userId: null,
+        role: 'ATTENDEE',
+        certificateCode,
+        recipientName,
+      })
 
-      // Generate PDF
       const pdfBuffer = await generateCertificatePDF({
-        orgName: org.name,
-        departmentName: dept.name,
-        sessionTitle: sessionFull.title,
-        sessionDate: new Date(sessionFull.date_start).toLocaleDateString('en-GB', {
+        orgName,
+        departmentName: department.name,
+        sessionTitle: session.title,
+        sessionDate: new Date(session.date_start).toLocaleDateString('en-GB', {
           weekday: 'long',
           year: 'numeric',
           month: 'long',
@@ -116,18 +170,18 @@ export async function submitFeedback(sessionId: string, feedback: FeedbackData) 
           day: 'numeric',
         }),
         verifyUrl,
-        leadName: dept.lead_name || undefined,
+        leadName: department.lead_name || undefined,
       })
 
-      // Send email with PDF attachment
       const resend = getResendClient()
-      const fromAddress = process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
-      const htmlBody = buildCertificateEmailHtml(sessionFull.title, recipientName)
+      const fromAddress =
+        process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
+      const htmlBody = buildCertificateEmailHtml(session.title, recipientName)
 
       await resend.emails.send({
         from: fromAddress,
-        to: feedback.email.toLowerCase(),
-        subject: `Your Attendance Certificate — ${sessionFull.title}`,
+        to: email,
+        subject: `Your Attendance Certificate — ${session.title}`,
         html: htmlBody,
         attachments: [
           {
@@ -139,198 +193,227 @@ export async function submitFeedback(sessionId: string, feedback: FeedbackData) 
     }
   } catch (certError) {
     console.error('Failed to generate/email certificate:', certError)
-    // Don't throw — feedback was saved successfully
   }
 
   revalidatePath(`/sessions/${sessionId}`)
   revalidatePath(`/sessions/${sessionId}/manage`)
-  return data
+  return inserted
 }
 
 export async function getSessionFeedback(sessionId: string) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  const { data: session } = await supabase
-    .from('sessions')
-    .select('department_id')
-    .eq('id', sessionId)
-    .eq('org_id', orgId)
-    .single()
-
-  if (!session) {
-    throw new Error('Session not found')
+  const scope = await sessionsDb.findSessionScope(sessionId, orgId)
+  if (!scope) {
+    throw new DbNotFoundError('Session not found')
   }
 
-  await requireDepartmentModerator(session.department_id)
+  await requireDepartmentModerator(scope.department_id)
 
-  const { data, error } = await supabase
-    .from('session_feedback')
-    .select('*')
-    .eq('org_id', orgId)
-    .eq('session_id', sessionId)
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    throw new Error(`Failed to fetch feedback: ${error.message}`)
-  }
-
-  return data || []
+  return feedbackDb.listSessionFeedback(orgId, sessionId)
 }
 
 export async function getSessionFeedbackStats(sessionId: string) {
   const feedback = await getSessionFeedback(sessionId)
 
   const total = feedback.length
-  const ratings = feedback.map(f => f.rating).filter(Boolean) as number[]
-  const averageRating = ratings.length > 0
-    ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length
-    : 0
-
+  const submissionScores: number[] = []
   const ratingDistribution = {
-    1: ratings.filter(r => r === 1).length,
-    2: ratings.filter(r => r === 2).length,
-    3: ratings.filter(r => r === 3).length,
-    4: ratings.filter(r => r === 4).length,
-    5: ratings.filter(r => r === 5).length,
+    1: 0,
+    2: 0,
+    3: 0,
+    4: 0,
+    5: 0,
   }
 
-  const comments = feedback.filter(f => f.comment && f.comment.trim().length > 0)
+  const questionSummaries = new Map<
+    string,
+    {
+      fieldId: string
+      label: string
+      ratings: number[]
+      commentsCount: number
+    }
+  >()
+
+  const comments = feedback.flatMap((entry) => {
+    const { answers, textResponses } = getFeedbackTextResponses(entry)
+    const submissionScore = getFeedbackSubmissionScore(answers, entry.rating)
+
+    if (submissionScore !== null) {
+      submissionScores.push(submissionScore)
+      const bucket = Math.min(5, Math.max(1, Math.round(submissionScore))) as
+        | 1
+        | 2
+        | 3
+        | 4
+        | 5
+      ratingDistribution[bucket] += 1
+    }
+
+    const scoredAnswers = answers.filter(
+      (answer): answer is SubmittedFeedbackAnswer & { value: string } =>
+        answer.type === 'rating' && Boolean(answer.value)
+    )
+
+    if (scoredAnswers.length > 0) {
+      scoredAnswers.forEach((answer) => {
+        const existing = questionSummaries.get(answer.fieldId) || {
+          fieldId: answer.fieldId,
+          label: answer.label,
+          ratings: [],
+          commentsCount: 0,
+        }
+
+        existing.ratings.push(Number(answer.value))
+        if (answer.comment) {
+          existing.commentsCount += 1
+        }
+
+        questionSummaries.set(answer.fieldId, existing)
+      })
+    } else if (entry.rating) {
+      const existing = questionSummaries.get('overall_session_rating') || {
+        fieldId: 'overall_session_rating',
+        label: 'Overall session rating',
+        ratings: [],
+        commentsCount: 0,
+      }
+
+      existing.ratings.push(entry.rating)
+      if (textResponses.length > 0) {
+        existing.commentsCount += textResponses.length
+      }
+
+      questionSummaries.set('overall_session_rating', existing)
+    }
+
+    if (textResponses.length === 0) {
+      return []
+    }
+
+    return [
+      {
+        id: entry.id,
+        rating:
+          submissionScore !== null
+            ? Math.round(submissionScore * 10) / 10
+            : entry.rating,
+        created_at: entry.created_at,
+        responses: textResponses,
+      },
+    ]
+  })
+
+  const averageRating =
+    submissionScores.length > 0
+      ? Math.round(
+          (submissionScores.reduce((sum, score) => sum + score, 0) /
+            submissionScores.length) *
+            10
+        ) / 10
+      : 0
 
   return {
     total,
-    averageRating: Math.round(averageRating * 10) / 10,
+    averageRating,
     ratingDistribution,
-    commentsCount: comments.length,
+    commentsCount: comments.reduce((sum, entry) => sum + entry.responses.length, 0),
     comments,
+    questionSummaries: Array.from(questionSummaries.values()).map((summary) => {
+      const average =
+        summary.ratings.length > 0
+          ? Math.round(
+              (summary.ratings.reduce((sum, rating) => sum + rating, 0) /
+                summary.ratings.length) *
+                10
+            ) / 10
+          : 0
+
+      return {
+        fieldId: summary.fieldId,
+        label: summary.label,
+        averageRating: average,
+        responseCount: summary.ratings.length,
+        commentsCount: summary.commentsCount,
+      }
+    }),
   }
 }
 
 export async function getSessionFeedbackAudit(sessionId: string) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  const { data: session } = await supabase
-    .from('sessions')
-    .select('department_id')
-    .eq('id', sessionId)
-    .eq('org_id', orgId)
-    .single()
-
-  if (!session) {
-    throw new Error('Session not found')
+  const scope = await sessionsDb.findSessionScope(sessionId, orgId)
+  if (!scope) {
+    throw new DbNotFoundError('Session not found')
   }
 
-  await requireDepartmentModerator(session.department_id)
+  await requireDepartmentModerator(scope.department_id)
 
-  const serviceClient = await createSupabaseServiceClient()
-
-  const { data, error } = await serviceClient
-    .from('session_feedback')
-    .select('id, attendee_first_name, attendee_last_name, attendee_email, rating, comment, created_at')
-    .eq('session_id', sessionId)
-    .order('created_at', { ascending: false })
-
-  if (error) {
-    throw new Error(`Failed to fetch audit data: ${error.message}`)
-  }
-
-  return data || []
+  const rows = await feedbackDb.listSessionFeedbackAudit(sessionId)
+  return rows.map((entry) => ({
+    ...entry,
+    answers: normalizeSubmittedFeedbackAnswers(entry.answers),
+  }))
 }
 
 export async function releaseTeacherFeedback(sessionId: string) {
   const orgId = await requireOrg()
-  const supabase = await createSupabaseClient()
 
-  // Fetch session
-  const { data: session } = await supabase
-    .from('sessions')
-    .select('id, title, date_start, department_id, org_id, status')
-    .eq('id', sessionId)
-    .eq('org_id', orgId)
-    .single()
-
+  const session = await sessionsDb.findSession(sessionId, orgId)
   if (!session) {
-    throw new Error('Session not found')
+    throw new DbNotFoundError('Session not found')
   }
 
   await requireDepartmentModerator(session.department_id)
 
-  const serviceClient = await createSupabaseServiceClient()
-
-  // Fetch org, department, feedback stats in parallel
-  const [orgResult, deptResult, feedbackStats] = await Promise.all([
-    serviceClient.from('organizations').select('name').eq('id', orgId).single(),
-    serviceClient.from('departments').select('name, lead_name').eq('id', session.department_id).single(),
+  const [orgName, department, feedbackStats] = await Promise.all([
+    feedbackDb.findOrganizationName(orgId),
+    feedbackDb.findDepartmentForFeedbackSubmission(session.department_id),
     getSessionFeedbackStats(sessionId),
   ])
 
-  const org = orgResult.data
-  const dept = deptResult.data
-
-  if (!org || !dept) {
-    throw new Error('Organization or department not found')
+  if (!orgName || !department) {
+    throw new DbNotFoundError('Organization or department not found')
   }
 
-  // Get feedback comments for the email
-  const { data: feedbackComments } = await serviceClient
-    .from('session_feedback')
-    .select('attendee_first_name, attendee_last_name, comment')
-    .eq('session_id', sessionId)
-    .not('comment', 'is', null)
-    .order('created_at', { ascending: false })
-
-  const comments = (feedbackComments || [])
-    .filter(f => f.comment && f.comment.trim().length > 0)
-    .map(f => ({
-      attendee_first_name: f.attendee_first_name,
-      attendee_last_name: f.attendee_last_name,
-      comment: f.comment!,
+  const feedbackComments = await feedbackDb.listSessionFeedbackComments(sessionId)
+  const comments = feedbackComments
+    .filter((entry) => entry.comment && entry.comment.trim().length > 0)
+    .map((entry) => ({
+      attendee_first_name: entry.attendee_first_name,
+      attendee_last_name: entry.attendee_last_name,
+      comment: entry.comment!,
     }))
 
-  // Get all teachers: external invitations (ACCEPTED) + registered session_teachers
-  const [invitationsResult, sessionTeachersResult] = await Promise.all([
-    serviceClient
-      .from('teacher_invitations')
-      .select('id, email, first_name, last_name')
-      .eq('session_id', sessionId)
-      .eq('status', 'ACCEPTED'),
-    serviceClient
-      .from('session_teachers')
-      .select('id, user_id')
-      .eq('session_id', sessionId),
+  const [externalTeachers, registeredTeachers] = await Promise.all([
+    feedbackDb.listAcceptedTeacherInvitations(sessionId),
+    feedbackDb.listRegisteredSessionTeachers(sessionId),
   ])
 
-  const externalTeachers = invitationsResult.data || []
-  const registeredTeachers = sessionTeachersResult.data || []
-
-  // Look up emails for registered teachers
   const registeredTeacherDetails: { email: string; name: string; userId: string }[] = []
-  for (const rt of registeredTeachers) {
-    const { data: profile } = await serviceClient
-      .from('profiles')
-      .select('email, full_name')
-      .eq('id', rt.user_id)
-      .single()
+  for (const teacher of registeredTeachers) {
+    const profile = await feedbackDb.findTeacherProfile(teacher.user_id)
     if (profile?.email) {
       registeredTeacherDetails.push({
         email: profile.email,
         name: profile.full_name || profile.email,
-        userId: rt.user_id,
+        userId: teacher.user_id,
       })
     }
   }
 
   const allTeachers = [
-    ...externalTeachers.map(t => ({
-      email: t.email,
-      name: `${t.first_name} ${t.last_name}`,
+    ...externalTeachers.map((teacher) => ({
+      email: teacher.email,
+      name: `${teacher.first_name} ${teacher.last_name}`,
       userId: null as string | null,
     })),
-    ...registeredTeacherDetails.map(t => ({
-      email: t.email,
-      name: t.name,
-      userId: t.userId as string | null,
+    ...registeredTeacherDetails.map((teacher) => ({
+      email: teacher.email,
+      name: teacher.name,
+      userId: teacher.userId as string | null,
     })),
   ]
 
@@ -346,34 +429,30 @@ export async function releaseTeacherFeedback(sessionId: string) {
   })
 
   const resend = getResendClient()
-  const fromAddress = process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
+  const fromAddress =
+    process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
   let sentCount = 0
 
   for (const teacher of allTeachers) {
     try {
-      // Generate certificate
       const certificateCode = generateCertificateCode()
       const verifyUrl = `${baseUrl}/verify/${certificateCode}`
 
-      // Create certificate record
-      await serviceClient
-        .from('certificates')
-        .insert({
-          org_id: orgId,
-          department_id: session.department_id,
-          session_id: sessionId,
-          user_id: teacher.userId,
-          certificate_role: 'TEACHER',
-          certificate_code: certificateCode,
-          recipient_name: teacher.name,
-        })
+      await certificatesDb.insertCertificate({
+        orgId,
+        departmentId: session.department_id,
+        sessionId,
+        userId: teacher.userId,
+        role: 'TEACHER',
+        certificateCode,
+        recipientName: teacher.name,
+      })
 
-      // Generate PDF
       const pdfBuffer = await generateCertificatePDF({
-        orgName: org.name,
-        departmentName: dept.name,
+        orgName,
+        departmentName: department.name,
         sessionTitle: session.title,
         sessionDate,
         recipientName: teacher.name,
@@ -385,27 +464,25 @@ export async function releaseTeacherFeedback(sessionId: string) {
           day: 'numeric',
         }),
         verifyUrl,
-        leadName: dept.lead_name || undefined,
+        leadName: department.lead_name || undefined,
       })
 
-      // Build email
-      const htmlBody = buildTeacherFeedbackEmailHtml({
+      const html = buildTeacherFeedbackEmailHtml({
         teacherName: teacher.name,
         sessionTitle: session.title,
         sessionDate,
-        departmentName: dept.name,
+        departmentName: department.name,
         totalResponses: feedbackStats.total,
         averageRating: feedbackStats.averageRating,
         ratingDistribution: feedbackStats.ratingDistribution,
         comments,
       })
 
-      // Send email with PDF attachment
       await resend.emails.send({
         from: fromAddress,
         to: teacher.email,
-        subject: `Feedback Summary & Teaching Certificate — ${session.title}`,
-        html: htmlBody,
+        subject: `Teaching Feedback Released — ${session.title}`,
+        html,
         attachments: [
           {
             filename: `teacher-certificate-${certificateCode}.pdf`,
@@ -414,15 +491,16 @@ export async function releaseTeacherFeedback(sessionId: string) {
         ],
       })
 
-      sentCount++
-    } catch (teacherError) {
-      console.error(`Failed to send feedback to teacher ${teacher.email}:`, teacherError)
-      // Continue with next teacher
+      sentCount += 1
+    } catch (error) {
+      console.error(`Failed to send teacher feedback to ${teacher.email}:`, error)
     }
   }
 
   revalidatePath(`/sessions/${sessionId}/manage`)
-  revalidatePath('/audit')
 
-  return { sentCount, totalTeachers: allTeachers.length }
+  return {
+    sentCount,
+    totalTeachers: allTeachers.length,
+  }
 }
