@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { createSupabaseClient } from '@/lib/supabase/client'
@@ -8,7 +8,36 @@ import { finalizeMemberOnboarding } from '@/app/actions/member-onboarding'
 import { Card } from '@/components/Card'
 import { Button } from '@/components/Button'
 
+/**
+ * The page component is only a Suspense boundary. The real work lives in
+ * `JoinCallbackInner` because `useSearchParams()` forces a client-side
+ * bailout, which in Next.js 14 must be wrapped in <Suspense> so the
+ * outer page can still be statically prerendered at build time.
+ */
 export default function JoinCallbackPage() {
+  return (
+    <Suspense fallback={<JoinCallbackFallback />}>
+      <JoinCallbackInner />
+    </Suspense>
+  )
+}
+
+function JoinCallbackFallback() {
+  return (
+    <div className="min-h-screen px-4 py-8 sm:px-6">
+      <div className="mx-auto max-w-2xl">
+        <Card>
+          <h1 className="font-mono text-2xl font-bold">Completing Access</h1>
+          <p className="mt-3 font-mono text-sm text-gray-600">
+            Hold on while we finish signing you in and attach your membership.
+          </p>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function JoinCallbackInner() {
   const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
   const mode = searchParams.get('mode')
