@@ -15,7 +15,7 @@ import {
   getDepartmentsForOrg,
   getMyModeratedDepartments,
 } from '@/app/actions/departments'
-import { getAppUrl } from '@/lib/app-url'
+import { getAppUrl, getAppUrlFromHeaders } from '@/lib/app-url'
 import { getResendClient } from '@/lib/resend'
 import {
   buildDepartmentInviteActivationEmailHtml,
@@ -525,7 +525,8 @@ export async function beginDepartmentOnboarding(
 
   // Auth-plane: generate onboarding link via GoTrue and send email.
   const serviceClient = await createSupabaseServiceClient()
-  const redirectTo = `${getAppUrl()}/join/callback?requestId=${request.id}`
+  const baseUrl = await getAppUrlFromHeaders()
+  const redirectTo = `${baseUrl}/join/callback?requestId=${request.id}`
   const fullName = buildFullName(firstName, lastName)
 
   let generatedLinkType: OnboardingLinkType = linkType
@@ -651,7 +652,8 @@ export async function sendPasswordlessLoginLink(emailInput: string) {
 
   // Auth-plane: generate magic link via GoTrue.
   const serviceClient = await createSupabaseServiceClient()
-  const redirectTo = `${getAppUrl()}/join/callback?mode=login&next=/dashboard`
+  const baseUrl = await getAppUrlFromHeaders()
+  const redirectTo = `${baseUrl}/join/callback?mode=login&next=/dashboard`
   const { data, error } = await serviceClient.auth.admin.generateLink({
     type: 'magiclink',
     email,
