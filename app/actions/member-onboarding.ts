@@ -38,6 +38,16 @@ import { DbNotFoundError } from '@/lib/db'
 
 const DEFAULT_MEMBER_ROLE: UserRole = 'trainee'
 
+/**
+ * Supabase admin.generateLink() ignores the redirectTo option and sets
+ * redirect_to to the Site URL. This replaces it with the correct value.
+ */
+function patchActionLinkRedirect(actionLink: string, redirectTo: string): string {
+  const url = new URL(actionLink)
+  url.searchParams.set('redirect_to', redirectTo)
+  return url.toString()
+}
+
 interface BeginDepartmentOnboardingInput {
   inviteCode: string
   email: string
@@ -567,7 +577,7 @@ export async function beginDepartmentOnboarding(
     )
   }
 
-  actionLink = generatedLink.actionLink
+  actionLink = patchActionLinkRedirect(generatedLink.actionLink, redirectTo)
 
   const resend = getResendClient()
   const fromAddress =
@@ -677,7 +687,7 @@ export async function sendPasswordlessLoginLink(emailInput: string) {
     to: email,
     subject: 'Your Byte Teaching sign-in link',
     html: buildPasswordlessLoginEmailHtml({
-      inviteUrl: data.properties.action_link,
+      inviteUrl: patchActionLinkRedirect(data.properties.action_link, redirectTo),
       firstName,
     }),
   })
