@@ -39,12 +39,24 @@ import { DbNotFoundError } from '@/lib/db'
 const DEFAULT_MEMBER_ROLE: UserRole = 'trainee'
 
 /**
- * Supabase admin.generateLink() ignores the redirectTo option and sets
- * redirect_to to the Site URL. This replaces it with the correct value.
+ * Build a link pointing directly at our /join/callback page with the
+ * hashed token.  The callback page calls supabase.auth.verifyOtp()
+ * client-side, which bypasses Supabase's redirect_to handling entirely.
  */
-function patchActionLinkRedirect(actionLink: string, redirectTo: string): string {
-  const url = new URL(actionLink)
-  url.searchParams.set('redirect_to', redirectTo)
+function buildCallbackLink(
+  baseUrl: string,
+  hashedToken: string,
+  type: string,
+  extra?: Record<string, string>
+): string {
+  const url = new URL(`${baseUrl}/join/callback`)
+  url.searchParams.set('token_hash', hashedToken)
+  url.searchParams.set('type', type)
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      url.searchParams.set(k, v)
+    }
+  }
   return url.toString()
 }
 
@@ -536,7 +548,6 @@ export async function beginDepartmentOnboarding(
   // Auth-plane: generate onboarding link via GoTrue and send email.
   const serviceClient = await createSupabaseServiceClient()
   const baseUrl = await getAppUrlFromHeaders()
-  const redirectTo = `${baseUrl}/join/callback?requestId=${request.id}`
   const fullName = buildFullName(firstName, lastName)
 
   let generatedLinkType: OnboardingLinkType = linkType
@@ -547,7 +558,6 @@ export async function beginDepartmentOnboarding(
       type,
       email,
       options: {
-        redirectTo,
         data: {
           first_name: firstName,
           last_name: lastName,
@@ -555,8 +565,8 @@ export async function beginDepartmentOnboarding(
         },
       },
     })
-    if (error) return { actionLink: null, error }
-    return { actionLink: data.properties.action_link, error: null }
+    if (error) return { hashedToken: null, error }
+    return { hashedToken: data.properties.hashed_token, error: null }
   }
 
   let generatedLink = await generateLink(linkType)
@@ -571,13 +581,15 @@ export async function beginDepartmentOnboarding(
     generatedLink = await generateLink('magiclink')
   }
 
-  if (generatedLink.error || !generatedLink.actionLink) {
+  if (generatedLink.error || !generatedLink.hashedToken) {
     throw new Error(
       `Failed to generate onboarding link: ${generatedLink.error?.message || 'Unknown error'}`
     )
   }
 
-  actionLink = patchActionLinkRedirect(generatedLink.actionLink, redirectTo)
+  actionLink = buildCallbackLink(baseUrl, generatedLink.hashedToken, generatedLinkType, {
+    requestId: request.id,
+  })
 
   const resend = getResendClient()
   const fromAddress =
@@ -663,16 +675,19 @@ export async function sendPasswordlessLoginLink(emailInput: string) {
   // Auth-plane: generate magic link via GoTrue.
   const serviceClient = await createSupabaseServiceClient()
   const baseUrl = await getAppUrlFromHeaders()
-  const redirectTo = `${baseUrl}/join/callback?mode=login&next=/dashboard`
   const { data, error } = await serviceClient.auth.admin.generateLink({
     type: 'magiclink',
     email,
-    options: { redirectTo },
   })
 
   if (error) {
     throw new Error(`Failed to generate sign-in link: ${error.message}`)
   }
+
+  const inviteUrl = buildCallbackLink(baseUrl, data.properties.hashed_token, 'magiclink', {
+    mode: 'login',
+    next: '/dashboard',
+  })
 
   const resend = getResendClient()
   const fromAddress =
@@ -687,7 +702,7 @@ export async function sendPasswordlessLoginLink(emailInput: string) {
     to: email,
     subject: 'Your Byte Teaching sign-in link',
     html: buildPasswordlessLoginEmailHtml({
-      inviteUrl: patchActionLinkRedirect(data.properties.action_link, redirectTo),
+      inviteUrl,
       firstName,
     }),
   })
