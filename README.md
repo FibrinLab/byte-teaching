@@ -43,13 +43,20 @@ Create a `.env.local` file in the root directory with the following variables:
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Public app URL used in emailed sign-in and invite links
+NEXT_PUBLIC_APP_URL=https://your-production-domain.example
+
+# Email delivery
+RESEND_API_KEY=your-resend-api-key
 ```
 
 ### Supabase Setup
 
 1. Create a new Supabase project at https://supabase.com
 2. Enable Email authentication in Authentication > Providers
-3. Run the migrations in `supabase/migrations/` in order:
+3. In Authentication > URL Configuration, set the Site URL to the same value as `NEXT_PUBLIC_APP_URL`, and add your app callback URL to Redirect URLs, for example `https://your-production-domain.example/join/callback`.
+4. Run the migrations in `supabase/migrations/` in order:
    - `000_organizations.sql` - Creates organizations and organization_members tables
    - `001_initial_schema.sql` - Creates all other tables
    - `002_rls_policies.sql` - Sets up Row Level Security policies

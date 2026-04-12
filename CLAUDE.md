@@ -57,6 +57,7 @@ The attendance system is an append-only evidence aggregation pipeline (documente
 NEXT_PUBLIC_SUPABASE_URL      # Supabase project URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY # Supabase anon key
 SUPABASE_SERVICE_ROLE_KEY     # Supabase service role key (server-only)
+NEXT_PUBLIC_APP_URL           # Public app URL used in emailed sign-in/invite links
 RESEND_API_KEY                # Resend email API key (server-only)
 ```
 
