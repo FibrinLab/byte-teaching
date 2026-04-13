@@ -175,3 +175,12 @@ export async function getSessionTeachers(sessionId: string) {
   const orgId = await requireOrg()
   return sessionsDb.listSessionTeachers(orgId, sessionId)
 }
+
+export async function searchOrgMembersForTeacher(query: string) {
+  await requireAuth()
+  const orgId = await requireOrg()
+
+  if (!query || query.trim().length < 2) return []
+
+  return sessionsDb.searchOrgMemberProfiles(orgId, query.trim())
+}

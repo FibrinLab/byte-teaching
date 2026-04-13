@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireDepartmentModerator, requireOrg } from '@/lib/auth'
 import { generateCertificatePDF } from '@/lib/certificates/pdf'
 import { generateCertificateCode } from '@/lib/certificates/utils'
+import * as attendanceDb from '@/lib/db/attendance'
 import { getResendClient } from '@/lib/resend'
 import {
   buildCertificateEmailHtml,
@@ -22,6 +23,7 @@ import type {
   SubmittedFeedbackAnswer,
 } from '@/lib/types'
 import * as feedbackDb from '@/lib/db/feedback'
+import * as onboardingDb from '@/lib/db/onboarding'
 import * as sessionsDb from '@/lib/db/sessions'
 import * as certificatesDb from '@/lib/db/certificates'
 import { DbNotFoundError } from '@/lib/db'
@@ -121,9 +123,14 @@ export async function submitFeedback(sessionId: string, feedback: FeedbackData) 
     feedback.answers || []
   )
 
+  // Resolve user_id from email if they have a profile
+  const profile = await onboardingDb.findProfileByEmail(email)
+  const resolvedUserId = profile?.user_id ?? null
+
   const inserted = await feedbackDb.insertSessionFeedback({
     orgId: session.org_id,
     sessionId,
+    userId: resolvedUserId,
     rating: derivedRating,
     comment: derivedComment,
     answers: submittedAnswers,
@@ -131,6 +138,23 @@ export async function submitFeedback(sessionId: string, feedback: FeedbackData) 
     lastName,
     email,
   })
+
+  // Create attendance evidence — feedback submission = attended
+  try {
+    await attendanceDb.insertAttendanceEvidence({
+      orgId: session.org_id,
+      sessionId,
+      departmentId: session.department_id,
+      userId: resolvedUserId,
+      externalEmail: resolvedUserId ? null : email,
+      source: 'FEEDBACK',
+      observedAt: new Date().toISOString(),
+      metadata: { feedback_id: inserted.id },
+      createdBy: resolvedUserId,
+    })
+  } catch {
+    // Non-fatal — evidence creation failure shouldn't block feedback
+  }
 
   try {
     const recipientName = `${firstName} ${lastName}`
@@ -145,7 +169,7 @@ export async function submitFeedback(sessionId: string, feedback: FeedbackData) 
         orgId: session.org_id,
         departmentId: session.department_id,
         sessionId,
-        userId: null,
+        userId: resolvedUserId,
         role: 'ATTENDEE',
         certificateCode,
         recipientName,

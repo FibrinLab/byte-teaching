@@ -102,12 +102,6 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        <p className="mt-4 text-center font-mono text-sm">
-          Don&apos;t have a staff account?{' '}
-          <Link href="/signup" className="underline">
-            Sign up
-          </Link>
-        </p>
       </div>
     </div>
   )

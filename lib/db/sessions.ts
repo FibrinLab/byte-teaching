@@ -309,3 +309,40 @@ export async function isDepartmentMember(
   if (error) throw toDbError('Failed to check department membership', error)
   return !!data
 }
+
+export interface OrgMemberProfile {
+  user_id: string
+  email: string
+  full_name: string | null
+  first_name: string | null
+  last_name: string | null
+}
+
+export async function searchOrgMemberProfiles(
+  orgId: string,
+  query: string
+): Promise<OrgMemberProfile[]> {
+  const { getServiceDb } = await import('./client')
+  const db = await getServiceDb()
+
+  // Get user IDs in this org
+  const { data: members } = await db
+    .from('organization_members')
+    .select('user_id')
+    .eq('org_id', orgId)
+
+  if (!members || members.length === 0) return []
+
+  const userIds = members.map((m) => m.user_id)
+  const q = `%${query}%`
+
+  const { data: profiles, error } = await db
+    .from('profiles')
+    .select('user_id, email, full_name, first_name, last_name')
+    .in('user_id', userIds)
+    .or(`full_name.ilike.${q},first_name.ilike.${q},last_name.ilike.${q},email.ilike.${q}`)
+    .limit(8)
+
+  if (error) throw toDbError('Failed to search org members', error)
+  return (profiles ?? []) as OrgMemberProfile[]
+}

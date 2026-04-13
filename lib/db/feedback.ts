@@ -119,6 +119,7 @@ export async function findOrganizationName(orgId: string): Promise<string | null
 export interface InsertSessionFeedbackInput {
   orgId: string
   sessionId: string
+  userId?: string | null
   rating: number | null
   comment: string | null
   answers: SubmittedFeedbackAnswer[]
@@ -137,6 +138,7 @@ export async function insertSessionFeedback(
     .insert({
       org_id: input.orgId,
       session_id: input.sessionId,
+      user_id: input.userId ?? null,
       rating: input.rating,
       comment: input.comment,
       answers: input.answers,

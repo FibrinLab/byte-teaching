@@ -74,11 +74,6 @@ export default async function Home() {
                       Trainee Sign In
                     </Button>
                   </Link>
-                  <Link href="/signup">
-                    <Button variant="secondary" className="w-full sm:w-auto px-8 py-3 text-base">
-                      Staff Sign Up
-                    </Button>
-                  </Link>
                 </div>
               </div>
             </div>

@@ -68,15 +68,12 @@ export function Nav({ adminLink, roleLabel }: NavProps) {
     <nav className="border-b border-black">
       <div className="max-w-7xl mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
-          <Link href="/dashboard" className="flex items-center gap-3">
-            <img 
-              src="/assets/byte_logo.png" 
-              alt="Byte Teaching Logo" 
-              className="h-8 sm:h-10 w-auto"
+          <Link href="/dashboard">
+            <img
+              src="/assets/byte_logo.png"
+              alt="Byte Teaching"
+              className="h-10 sm:h-12 w-auto"
             />
-            <span className="font-mono text-lg font-bold hidden sm:inline">
-              BYTE TEACHING
-            </span>
           </Link>
           
           {/* Desktop Navigation */}

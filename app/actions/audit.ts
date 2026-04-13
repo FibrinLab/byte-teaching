@@ -257,3 +257,32 @@ async function buildCertificates(
     issuedAt: c.issued_at,
   }))
 }
+
+export async function generateAuditReportPDF(
+  dateFrom?: string,
+  dateTo?: string
+): Promise<{ base64: string; filename: string }> {
+  const data = await getAuditPageData()
+
+  // Filter sessions by date range
+  let sessions = data.recentSessions
+  if (dateFrom) sessions = sessions.filter((s) => s.dateStart >= dateFrom)
+  if (dateTo) sessions = sessions.filter((s) => s.dateStart <= dateTo + 'T23:59:59')
+
+  // Build a simple text-based PDF using @react-pdf/renderer
+  const { renderToBuffer } = await import('@react-pdf/renderer')
+  const { buildAuditReportDocument } = await import('@/lib/audit-report/pdf')
+
+  const buffer = await renderToBuffer(
+    buildAuditReportDocument({
+      departmentNames: data.departmentNames.map((d) => d.name),
+      sessions,
+      dateFrom,
+      dateTo,
+    })
+  )
+
+  const base64 = Buffer.from(buffer).toString('base64')
+  const dateLabel = [dateFrom, dateTo].filter(Boolean).join('_to_') || 'all-time'
+  return { base64, filename: `audit-report-${dateLabel}.pdf` }
+}

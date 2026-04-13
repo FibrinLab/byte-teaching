@@ -122,3 +122,57 @@ export async function getMyCertificates() {
 export async function getCertificateByCode(code: string) {
   return certificatesDb.findCertificateByCode(code)
 }
+
+export async function downloadMyCertificateForSession(sessionId: string) {
+  const userId = await requireAuth()
+
+  // Look up certificate record for this user + session (across all orgs)
+  const certificate = await certificatesDb.findCertificateByUserAndSession(userId, sessionId)
+  if (!certificate) {
+    throw new DbNotFoundError('No certificate found for this session')
+  }
+
+  // Fetch session details for the PDF
+  const session = await certificatesDb.findSessionForCertificateById(sessionId)
+  if (!session) {
+    throw new DbNotFoundError('Session not found')
+  }
+
+  const supabase = await createSupabaseClient()
+  const { data: userData } = await supabase.auth.getUser()
+
+  const recipientName =
+    certificate.recipient_name ||
+    userData?.user?.user_metadata?.full_name ||
+    userData?.user?.email ||
+    userId
+
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const verifyUrl = `${baseUrl}/verify/${certificate.certificate_code}`
+
+  const pdfBuffer = await generateCertificatePDF({
+    orgName: session.org_name || 'Organization',
+    departmentName: session.department_name || 'Department',
+    sessionTitle: session.title,
+    sessionDate: new Date(session.date_start).toLocaleDateString('en-GB', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }),
+    recipientName,
+    role: certificate.certificate_role === 'TEACHER' ? 'Teacher' : 'Attendee',
+    certificateCode: certificate.certificate_code,
+    issuedDate: new Date(certificate.issued_at).toLocaleDateString('en-GB', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }),
+    verifyUrl,
+    leadName: session.lead_name || undefined,
+  })
+
+  // Return base64 for client-side download
+  const base64 = Buffer.from(pdfBuffer).toString('base64')
+  return { base64, filename: `certificate-${session.title.replace(/\s+/g, '-').toLowerCase()}.pdf` }
+}

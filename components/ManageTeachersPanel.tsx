@@ -1,13 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from './Button'
 import { Input } from './Input'
-import { removeSessionTeacher } from '@/app/actions/sessions'
+import { addSessionTeacher, removeSessionTeacher, searchOrgMembersForTeacher } from '@/app/actions/sessions'
 import { sendTeacherEmail } from '@/app/actions/emails'
 import { inviteExternalTeacher, deleteTeacherInvitation } from '@/app/actions/teacher-invitations'
 import type { EmailType, TeacherInvitation } from '@/lib/types'
+import type { OrgMemberProfile } from '@/lib/db/sessions'
 
 interface ManageTeachersPanelProps {
   sessionId: string
@@ -29,6 +30,57 @@ export function ManageTeachersPanel({
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [inviteEmail, setInviteEmail] = useState('')
+
+  // Autocomplete state for internal teacher assignment
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<OrgMemberProfile[]>([])
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function handleSearchChange(value: string) {
+    setSearchQuery(value)
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+    if (value.trim().length < 2) {
+      setSearchResults([])
+      setSearchOpen(false)
+      return
+    }
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const results = await searchOrgMembersForTeacher(value)
+        // Filter out already-assigned teachers
+        const assignedIds = new Set(currentTeachers.map((t) => t.user_id))
+        setSearchResults(results.filter((r) => !assignedIds.has(r.user_id)))
+        setSearchOpen(true)
+      } catch {
+        setSearchResults([])
+      }
+    }, 300)
+  }
+
+  async function handleAssignInternal(member: OrgMemberProfile) {
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchResults([])
+    setLoading('assign')
+    setError(null)
+    setSuccess(null)
+
+    try {
+      await addSessionTeacher(sessionId, member.user_id)
+      try {
+        await sendTeacherEmail(sessionId, member.user_id, 'INVITATION')
+      } catch {
+        // Non-fatal — teacher is assigned even if email fails
+      }
+      setSuccess(`${member.full_name || member.email} assigned as teacher`)
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to assign teacher')
+    } finally {
+      setLoading(null)
+    }
+  }
 
   async function handleInvite() {
     if (!inviteEmail.trim()) return
@@ -154,9 +206,46 @@ export function ManageTeachersPanel({
         </div>
       )}
 
-      {/* Invite by Email */}
+      {/* Assign Internal Teacher */}
+      <div className="relative">
+        <h3 className="font-mono font-bold mb-2">Assign Teacher</h3>
+        <p className="font-mono text-xs text-gray-500 mb-2">
+          Search by name or email to assign an internal member.
+        </p>
+        <Input
+          value={searchQuery}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          placeholder="Start typing a name or email..."
+          className="w-full"
+        />
+        {searchOpen && searchResults.length > 0 && (
+          <div className="absolute z-10 mt-1 w-full border border-black bg-white shadow-lg max-h-60 overflow-y-auto">
+            {searchResults.map((member) => (
+              <button
+                key={member.user_id}
+                type="button"
+                onClick={() => handleAssignInternal(member)}
+                disabled={loading === 'assign'}
+                className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-200 last:border-b-0"
+              >
+                <p className="font-mono text-sm font-bold">
+                  {member.full_name || [member.first_name, member.last_name].filter(Boolean).join(' ') || member.email}
+                </p>
+                <p className="font-mono text-xs text-gray-500">{member.email}</p>
+              </button>
+            ))}
+          </div>
+        )}
+        {searchOpen && searchResults.length === 0 && searchQuery.length >= 2 && (
+          <div className="absolute z-10 mt-1 w-full border border-black bg-white px-4 py-3">
+            <p className="font-mono text-sm text-gray-500">No members found. Use the invite form below for external teachers.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Invite External Teacher by Email */}
       <div>
-        <h3 className="font-mono font-bold mb-2">Invite Teacher</h3>
+        <h3 className="font-mono font-bold mb-2">Invite External Teacher</h3>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             type="email"

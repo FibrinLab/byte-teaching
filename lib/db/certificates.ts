@@ -207,3 +207,46 @@ export async function hasUserSubmittedFeedback(
   if (error) throw toDbError('Failed to check feedback', error)
   return !!data
 }
+
+export async function findCertificateByUserAndSession(
+  userId: string,
+  sessionId: string
+): Promise<{ certificate_code: string; certificate_role: string; issued_at: string; recipient_name: string | null } | null> {
+  const { getServiceDb } = await import('./client')
+  const db = await getServiceDb()
+  const { data, error } = await db
+    .from('certificates')
+    .select('certificate_code, certificate_role, issued_at, recipient_name')
+    .eq('user_id', userId)
+    .eq('session_id', sessionId)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to find certificate', error)
+  return data
+}
+
+export async function findSessionForCertificateById(
+  sessionId: string
+): Promise<{ title: string; date_start: string; org_name: string | null; department_name: string | null; lead_name: string | null } | null> {
+  const { getServiceDb } = await import('./client')
+  const db = await getServiceDb()
+  const { data, error } = await db
+    .from('sessions')
+    .select('title, date_start, organizations:org_id(name), departments:department_id(name, lead_name)')
+    .eq('id', sessionId)
+    .maybeSingle()
+
+  if (error) throw toDbError('Failed to find session for certificate', error)
+  if (!data) return null
+
+  const org = Array.isArray(data.organizations) ? data.organizations[0] : data.organizations
+  const dept = Array.isArray(data.departments) ? data.departments[0] : data.departments
+
+  return {
+    title: data.title,
+    date_start: data.date_start,
+    org_name: org?.name ?? null,
+    department_name: dept?.name ?? null,
+    lead_name: (dept as Record<string, unknown>)?.lead_name as string | null ?? null,
+  }
+}

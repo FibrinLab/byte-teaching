@@ -130,14 +130,6 @@ export default async function SettingsPage() {
               </>
             ) : null}
 
-            <Card>
-              <h2 className="mb-2 text-xl font-mono font-bold">Certificate Settings</h2>
-              <p className="font-mono text-sm text-gray-600">
-                Update department feedback fields and certificate details from a single settings
-                surface.
-              </p>
-            </Card>
-
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
               {departmentSettings.map(({ department, settings, members }) => (
                 <Card key={department.id}>
