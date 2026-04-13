@@ -21,9 +21,10 @@ export async function insertOrganizationAsUser(input: {
   createdBy: string
 }): Promise<{ id: string; name: string; created_by: string; created_at: string }> {
   const db = await getDb()
+  const id = crypto.randomUUID()
   const { data, error } = await db
     .from('organizations')
-    .insert({ name: input.name, created_by: input.createdBy })
+    .insert({ id, name: input.name, created_by: input.createdBy })
     .select()
     .single()
 
@@ -38,6 +39,7 @@ export async function insertOrganizationMemberAsUser(input: {
 }): Promise<void> {
   const db = await getDb()
   const { error } = await db.from('organization_members').insert({
+    id: crypto.randomUUID(),
     org_id: input.orgId,
     user_id: input.userId,
     role: input.role,
@@ -52,9 +54,11 @@ export async function insertDepartmentForOrg(input: {
   createdBy: string
 }): Promise<{ id: string; name: string; org_id: string }> {
   const db = await getServiceDb()
+  const id = crypto.randomUUID()
   const { data, error } = await db
     .from('departments')
     .insert({
+      id,
       org_id: input.orgId,
       name: input.name,
       created_by: input.createdBy,
