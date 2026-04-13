@@ -38,7 +38,7 @@ export default async function JoinByDeptCodePage() {
         />
 
         <div className="mt-6 text-center">
-          <Link href="/trainee-login" className="font-mono text-sm underline">
+          <Link href="/login" className="font-mono text-sm underline">
             Already have access? Sign in
           </Link>
         </div>

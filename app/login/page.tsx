@@ -2,17 +2,19 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { Input } from '@/components/Input'
 import { Button } from '@/components/Button'
-import Link from 'next/link'
+import { PasswordlessLoginForm } from '@/components/PasswordlessLoginForm'
 
 export default function LoginPage() {
+  const [showPassword, setShowPassword] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handlePasswordLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError(null)
@@ -20,9 +22,7 @@ export default function LoginPage() {
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ email, password }),
       })
@@ -37,7 +37,6 @@ export default function LoginPage() {
       await new Promise((resolve) => setTimeout(resolve, 200))
       window.location.replace('/dashboard')
     } catch (err) {
-      console.error('Unexpected error:', err)
       setError(err instanceof Error ? err.message : 'An unexpected error occurred')
       setLoading(false)
     }
@@ -56,52 +55,62 @@ export default function LoginPage() {
             priority
           />
         </div>
-        <h2 className="text-lg sm:text-xl font-mono font-bold mb-2 text-center">Staff Login</h2>
+
+        <h2 className="text-lg sm:text-xl font-mono font-bold mb-2 text-center">Sign In</h2>
         <p className="mb-6 text-center font-mono text-sm text-gray-600">
-          For moderators, org admins, and password-based accounts.
+          Enter your email to receive a sign-in link.
         </p>
 
-        {error ? (
-          <div className="mb-4 border border-red-500 bg-red-50 p-4">
-            <p className="font-mono text-sm text-red-800">{error}</p>
-          </div>
-        ) : null}
+        {/* Passwordless login (default) */}
+        {!showPassword && <PasswordlessLoginForm />}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input
-            label="Email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <Input
-            label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <Button type="submit" disabled={loading} className="w-full">
-            {loading ? 'Logging in...' : 'Login'}
-          </Button>
-        </form>
+        {/* Password login (admin toggle) */}
+        {showPassword && (
+          <>
+            {error && (
+              <div className="mb-4 border border-red-500 bg-red-50 p-4">
+                <p className="font-mono text-sm text-red-800">{error}</p>
+              </div>
+            )}
+            <form onSubmit={handlePasswordLogin} className="space-y-4">
+              <Input
+                label="Email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+              <Input
+                label="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <Button type="submit" disabled={loading} className="w-full">
+                {loading ? 'Signing in...' : 'Sign In'}
+              </Button>
+            </form>
+          </>
+        )}
 
-        <div className="mt-6 border-t border-black pt-6">
-          <h3 className="font-mono text-sm font-bold uppercase tracking-[0.2em]">
-            Trainee Access
-          </h3>
-          <p className="mt-3 font-mono text-sm text-gray-600">
-            Trainees invited through a department link should use the passwordless sign-in page.
-          </p>
-          <Link
-            href="/trainee-login"
-            className="mt-4 inline-block border border-black bg-white px-4 py-3 font-mono text-sm text-black hover:bg-gray-50"
+        {/* Toggle */}
+        <div className="mt-6 border-t border-gray-200 pt-4 text-center">
+          <button
+            type="button"
+            onClick={() => { setShowPassword(!showPassword); setError(null) }}
+            className="font-mono text-xs text-gray-400 underline"
           >
-            Go to Trainee Sign-In
-          </Link>
+            {showPassword ? 'Use magic link instead' : 'Admin? Sign in with password'}
+          </button>
         </div>
 
+        {/* Join link */}
+        <div className="mt-4 text-center">
+          <Link href="/join/dept" className="font-mono text-sm underline">
+            New here? Join a department
+          </Link>
+        </div>
       </div>
     </div>
   )

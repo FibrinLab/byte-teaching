@@ -355,13 +355,12 @@ interface ModeratorWelcomeEmailParams {
   departmentName: string
   organizationName: string
   email: string
-  temporaryPassword: string
   loginUrl: string
 }
 
 export function buildModeratorWelcomeEmailHtml(params: ModeratorWelcomeEmailParams): string {
   return buildMonospaceEmailShell(
-    'Your Moderator Account',
+    'Moderator Access Granted',
     `
       <p style="margin:20px 0;">Hello,</p>
       <p style="margin:20px 0;">
@@ -369,26 +368,12 @@ export function buildModeratorWelcomeEmailHtml(params: ModeratorWelcomeEmailPara
         <strong>${params.departmentName}</strong> in
         <strong>${params.organizationName}</strong>.
       </p>
-      <p style="margin:20px 0;">Use the credentials below to sign in:</p>
-
-      <table style="width:100%;border-collapse:collapse;margin:20px 0;border:1px solid #000;">
-        <tr>
-          <td style="padding:10px;font-weight:bold;border-bottom:1px solid #ccc;">Email</td>
-          <td style="padding:10px;border-bottom:1px solid #ccc;">${params.email}</td>
-        </tr>
-        <tr>
-          <td style="padding:10px;font-weight:bold;">Temporary Password</td>
-          <td style="padding:10px;font-family:monospace;font-size:16px;letter-spacing:1px;">${params.temporaryPassword}</td>
-        </tr>
-      </table>
-
+      <p style="margin:20px 0;">
+        As a moderator you can create sessions, manage teachers, track attendance, and release feedback reports.
+      </p>
       <a href="${params.loginUrl}" style="display:inline-block;background:#000;color:#fff;padding:12px 24px;text-decoration:none;font-family:monospace;font-size:14px;">
         Sign In
       </a>
-
-      <p style="margin:20px 0;color:#666;">
-        Please change your password after your first sign-in.
-      </p>
     `
   )
 }

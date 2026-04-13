@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from './Button'
-import { grantDepartmentModerator, grantSuperAdmin, revokeDepartmentModerator, revokeSuperAdmin } from '@/app/actions/super-admin'
+import { useToast } from './ToastProvider'
+import { grantDepartmentModerator, grantSuperAdmin, revokeDepartmentModerator, revokeSuperAdmin, deleteUser } from '@/app/actions/super-admin'
 
 interface UserItem {
   id: string
@@ -45,8 +46,8 @@ export function SuperAdminUsersPanel({
   currentUserId,
 }: SuperAdminUsersPanelProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [loadingId, setLoadingId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [selectedDepartment, setSelectedDepartment] = useState<Record<string, string>>({})
   const [query, setQuery] = useState('')
 
@@ -57,12 +58,12 @@ export function SuperAdminUsersPanel({
 
   async function handleGrant(userId: string) {
     setLoadingId(userId)
-    setError(null)
+    // toast handles feedback
     try {
       await grantSuperAdmin(userId)
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to grant super admin')
+      showToast({ variant: 'error', title: 'Failed to grant super admin', description: err instanceof Error ? err.message : undefined })
     } finally {
       setLoadingId(null)
     }
@@ -70,16 +71,16 @@ export function SuperAdminUsersPanel({
 
   async function handleRevoke(userId: string) {
     if (userId === currentUserId) {
-      setError('You cannot revoke your own super admin access.')
+      showToast({ variant: 'error', title: 'Cannot revoke your own access' })
       return
     }
     setLoadingId(userId)
-    setError(null)
+    // toast handles feedback
     try {
       await revokeSuperAdmin(userId)
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to revoke super admin')
+      showToast({ variant: 'error', title: 'Failed to revoke super admin', description: err instanceof Error ? err.message : undefined })
     } finally {
       setLoadingId(null)
     }
@@ -88,16 +89,16 @@ export function SuperAdminUsersPanel({
   async function handleGrantModerator(userId: string) {
     const departmentId = selectedDepartment[userId]
     if (!departmentId) {
-      setError('Select a department to grant moderator access.')
+      showToast({ variant: 'error', title: 'Select a department first' })
       return
     }
     setLoadingId(`${userId}-grant`)
-    setError(null)
+    // toast handles feedback
     try {
       await grantDepartmentModerator(userId, departmentId)
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to grant moderator')
+      showToast({ variant: 'error', title: 'Failed to grant moderator', description: err instanceof Error ? err.message : undefined })
     } finally {
       setLoadingId(null)
     }
@@ -105,12 +106,31 @@ export function SuperAdminUsersPanel({
 
   async function handleRevokeModerator(userId: string, departmentId: string) {
     setLoadingId(`${userId}-revoke-${departmentId}`)
-    setError(null)
+    // toast handles feedback
     try {
       await revokeDepartmentModerator(userId, departmentId)
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to revoke moderator')
+      showToast({ variant: 'error', title: 'Failed to revoke moderator', description: err instanceof Error ? err.message : undefined })
+    } finally {
+      setLoadingId(null)
+    }
+  }
+
+  async function handleDeleteUser(userId: string, email: string | null) {
+    if (userId === currentUserId) {
+      showToast({ variant: 'error', title: 'Cannot delete your own account' })
+      return
+    }
+    if (!confirm(`Permanently delete ${email || userId}? This cannot be undone.`)) return
+
+    setLoadingId(`${userId}-delete`)
+    // toast handles feedback
+    try {
+      await deleteUser(userId)
+      router.refresh()
+    } catch (err) {
+      showToast({ variant: 'error', title: 'Failed to delete user', description: err instanceof Error ? err.message : undefined })
     } finally {
       setLoadingId(null)
     }
@@ -122,12 +142,6 @@ export function SuperAdminUsersPanel({
 
   return (
     <div className="space-y-4">
-      {error && (
-        <div className="p-4 border border-red-500 bg-red-50">
-          <p className="font-mono text-sm text-red-800">{error}</p>
-        </div>
-      )}
-
       <div className="mb-4">
         <input
           type="text"
@@ -149,12 +163,12 @@ export function SuperAdminUsersPanel({
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                 <div className="font-mono text-sm">
                   <div className="font-bold">{user.email || user.id}</div>
-                  {orgMemberships.length > 0 && (
+                  {isSuper && <div className="text-gray-600">Super Admin</div>}
+                  {!isSuper && orgMemberships.length > 0 && (
                     <div className="text-gray-600">
                       Org: {orgMemberships.map(m => m.org_name).join(', ')}
                     </div>
                   )}
-                  {isSuper && <div className="text-gray-600">Super Admin</div>}
                   {moderatorDepts.length > 0 && (
                     <div className="text-gray-600">
                       Moderator: {moderatorDepts.map(m => m.department_name).join(', ')}
@@ -163,27 +177,31 @@ export function SuperAdminUsersPanel({
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <select
-                    className="px-3 py-2 border border-black font-mono text-sm bg-white"
-                    value={selectedDepartment[user.id] || ''}
-                    onChange={(e) =>
-                      setSelectedDepartment(prev => ({ ...prev, [user.id]: e.target.value }))
-                    }
-                  >
-                    <option value="">Select dept</option>
-                    {departments.map(dept => (
-                      <option key={dept.id} value={dept.id}>
-                        {dept.name}
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    onClick={() => handleGrantModerator(user.id)}
-                    disabled={loadingId === `${user.id}-grant`}
-                  >
-                    Grant Mod
-                  </Button>
+                  {user.id !== currentUserId && (
+                    <>
+                      <select
+                        className="px-3 py-2 border border-black font-mono text-sm bg-white"
+                        value={selectedDepartment[user.id] || ''}
+                        onChange={(e) =>
+                          setSelectedDepartment(prev => ({ ...prev, [user.id]: e.target.value }))
+                        }
+                      >
+                        <option value="">Select dept</option>
+                        {departments.map(dept => (
+                          <option key={dept.id} value={dept.id}>
+                            {dept.name}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        type="button"
+                        onClick={() => handleGrantModerator(user.id)}
+                        disabled={loadingId === `${user.id}-grant`}
+                      >
+                        Grant Mod
+                      </Button>
+                    </>
+                  )}
                   {moderatorDepts.map(m => (
                     <Button
                       key={`${user.id}-${m.department_id}`}
@@ -196,14 +214,16 @@ export function SuperAdminUsersPanel({
                     </Button>
                   ))}
                   {isSuper ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => handleRevoke(user.id)}
-                      disabled={loadingId === user.id}
-                    >
-                      Revoke Super
-                    </Button>
+                    user.id !== currentUserId ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => handleRevoke(user.id)}
+                        disabled={loadingId === user.id}
+                      >
+                        Revoke Super
+                      </Button>
+                    ) : null
                   ) : (
                     <Button
                       type="button"
@@ -211,6 +231,16 @@ export function SuperAdminUsersPanel({
                       disabled={loadingId === user.id}
                     >
                       Grant Super
+                    </Button>
+                  )}
+                  {user.id !== currentUserId && (
+                    <Button
+                      type="button"
+                      variant="danger"
+                      onClick={() => handleDeleteUser(user.id, user.email)}
+                      disabled={loadingId === `${user.id}-delete`}
+                    >
+                      {loadingId === `${user.id}-delete` ? 'Deleting...' : 'Delete'}
                     </Button>
                   )}
                 </div>

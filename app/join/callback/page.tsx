@@ -41,7 +41,7 @@ function JoinCallbackInner() {
   const searchParams = useSearchParams()
   const [error, setError] = useState<string | null>(null)
   const mode = searchParams.get('mode')
-  const loginHref = mode === 'login' ? '/trainee-login' : '/login'
+  const loginHref = '/login'
 
   useEffect(() => {
     let cancelled = false

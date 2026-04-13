@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from './Button'
 import { Input } from './Input'
+import { useToast } from './ToastProvider'
 import { addSessionTeacher, removeSessionTeacher, searchOrgMembersForTeacher } from '@/app/actions/sessions'
 import { sendTeacherEmail } from '@/app/actions/emails'
 import { inviteExternalTeacher, deleteTeacherInvitation } from '@/app/actions/teacher-invitations'
@@ -26,9 +27,8 @@ export function ManageTeachersPanel({
   invitations,
 }: ManageTeachersPanelProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [loading, setLoading] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
   const [inviteEmail, setInviteEmail] = useState('')
 
   // Autocomplete state for internal teacher assignment
@@ -63,8 +63,7 @@ export function ManageTeachersPanel({
     setSearchQuery('')
     setSearchResults([])
     setLoading('assign')
-    setError(null)
-    setSuccess(null)
+    // toast handles feedback
 
     try {
       await addSessionTeacher(sessionId, member.user_id)
@@ -73,10 +72,10 @@ export function ManageTeachersPanel({
       } catch {
         // Non-fatal — teacher is assigned even if email fails
       }
-      setSuccess(`${member.full_name || member.email} assigned as teacher`)
+      showToast({ variant: 'success', title: `${member.full_name || member.email} assigned as teacher` })
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to assign teacher')
+      showToast({ variant: 'error', title: 'Failed to assign teacher', description: err instanceof Error ? err.message : undefined })
     } finally {
       setLoading(null)
     }
@@ -86,20 +85,19 @@ export function ManageTeachersPanel({
     if (!inviteEmail.trim()) return
 
     setLoading('invite')
-    setError(null)
-    setSuccess(null)
+    // toast handles feedback
 
     try {
       const result = await inviteExternalTeacher(sessionId, inviteEmail.trim())
       if (result.emailSent === false) {
-        setSuccess(`Invitation created but email could not be sent: ${result.emailError}`)
+        showToast({ variant: 'info', title: 'Invitation created', description: `Email could not be sent: ${result.emailError}` })
       } else {
-        setSuccess('Invitation sent successfully')
+        showToast({ variant: 'success', title: 'Invitation sent' })
       }
       setInviteEmail('')
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send invitation')
+      showToast({ variant: 'error', title: 'Failed to send invitation', description: err instanceof Error ? err.message : undefined })
     } finally {
       setLoading(null)
     }
@@ -107,14 +105,13 @@ export function ManageTeachersPanel({
 
   async function handleRemoveTeacher(userId: string) {
     setLoading(`remove-${userId}`)
-    setError(null)
-    setSuccess(null)
+    // toast handles feedback
 
     try {
       await removeSessionTeacher(sessionId, userId)
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove teacher')
+      showToast({ variant: 'error', title: 'Failed to remove teacher', description: err instanceof Error ? err.message : undefined })
     } finally {
       setLoading(null)
     }
@@ -123,15 +120,14 @@ export function ManageTeachersPanel({
   async function handleSendEmail(userId: string, emailType: EmailType) {
     const key = `${emailType.toLowerCase()}-${userId}`
     setLoading(key)
-    setError(null)
-    setSuccess(null)
+    // toast handles feedback
 
     try {
       await sendTeacherEmail(sessionId, userId, emailType)
-      setSuccess(`${emailType === 'INVITATION' ? 'Invitation' : 'Reminder'} sent successfully`)
+      showToast({ variant: 'success', title: `${emailType === 'INVITATION' ? 'Invitation' : 'Reminder'} sent` })
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to send ${emailType.toLowerCase()}`)
+      showToast({ variant: 'error', title: `Failed to send ${emailType.toLowerCase()}`, description: err instanceof Error ? err.message : undefined })
     } finally {
       setLoading(null)
     }
@@ -139,19 +135,18 @@ export function ManageTeachersPanel({
 
   async function handleResendInvitation(invitation: TeacherInvitation) {
     setLoading(`resend-${invitation.id}`)
-    setError(null)
-    setSuccess(null)
+    // toast handles feedback
 
     try {
       await inviteExternalTeacher(sessionId, invitation.email)
-      setSuccess('Invitation resent successfully')
+      showToast({ variant: 'success', title: 'Invitation resent' })
       router.refresh()
     } catch (err) {
       // If existing pending, that's fine — the email was already sent
       if (err instanceof Error && err.message.includes('already been sent')) {
-        setError(err.message)
+        showToast({ variant: 'error', title: err.message })
       } else {
-        setError(err instanceof Error ? err.message : 'Failed to resend invitation')
+        showToast({ variant: 'error', title: 'Failed to resend invitation', description: err instanceof Error ? err.message : undefined })
       }
     } finally {
       setLoading(null)
@@ -160,14 +155,13 @@ export function ManageTeachersPanel({
 
   async function handleDeleteInvitation(invitationId: string) {
     setLoading(`delete-${invitationId}`)
-    setError(null)
-    setSuccess(null)
+    // toast handles feedback
 
     try {
       await deleteTeacherInvitation(sessionId, invitationId)
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete invitation')
+      showToast({ variant: 'error', title: 'Failed to delete invitation', description: err instanceof Error ? err.message : undefined })
     } finally {
       setLoading(null)
     }
@@ -194,18 +188,6 @@ export function ManageTeachersPanel({
 
   return (
     <div className="space-y-6">
-      {error && (
-        <div className="p-4 border border-red-500 bg-red-50">
-          <p className="font-mono text-sm text-red-800">{error}</p>
-        </div>
-      )}
-
-      {success && (
-        <div className="p-4 border border-green-500 bg-green-50">
-          <p className="font-mono text-sm text-green-800">{success}</p>
-        </div>
-      )}
-
       {/* Assign Internal Teacher */}
       <div className="relative">
         <h3 className="font-mono font-bold mb-2">Assign Teacher</h3>

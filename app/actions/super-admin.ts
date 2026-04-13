@@ -19,12 +19,6 @@ export async function createOrganizationAsSuperAdmin(name: string) {
     createdBy: userId,
   })
 
-  await superAdminsDb.insertOrganizationMemberAsUser({
-    orgId: org.id,
-    userId,
-    role: 'org_admin',
-  })
-
   revalidatePath('/super-admin')
   return org
 }
@@ -146,20 +140,33 @@ export async function revokeSuperAdmin(userId: string) {
   return { success: true }
 }
 
-function generateTemporaryPassword(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$'
-  let password = ''
-  for (let i = 0; i < 12; i++) {
-    password += chars[Math.floor(Math.random() * chars.length)]
+export async function deleteUser(userId: string) {
+  const currentUserId = await requireAuth()
+  await requireSuperAdmin()
+
+  if (userId === currentUserId) {
+    throw new Error('You cannot delete your own account')
   }
-  return password
+
+  const supabase = await createSupabaseServiceClient()
+
+  // Remove from all tables (cascade will handle most, but auth needs explicit delete)
+  await supabase.from('department_members').delete().eq('user_id', userId)
+  await supabase.from('organization_members').delete().eq('user_id', userId)
+  await supabase.from('profiles').delete().eq('user_id', userId)
+  await superAdminsDb.deleteSuperAdmin(userId).catch(() => {})
+
+  // Delete from Supabase Auth
+  const { error } = await supabase.auth.admin.deleteUser(userId)
+  if (error) throw new Error(`Failed to delete user: ${error.message}`)
+
+  revalidatePath('/super-admin')
+  return { success: true }
 }
 
 export async function createModeratorAccount(input: {
   email: string
   departmentId: string
-  firstName?: string
-  lastName?: string
 }) {
   await requireSuperAdmin()
 
@@ -180,70 +187,88 @@ export async function createModeratorAccount(input: {
   const org = Array.isArray(dept.organizations) ? dept.organizations[0] : dept.organizations
   const orgName = org?.name ?? 'Unknown'
 
-  // Generate temporary password
-  const temporaryPassword = generateTemporaryPassword()
+  // Check if user already exists
+  const { data: existingProfile } = await supabase
+    .from('profiles')
+    .select('user_id')
+    .eq('email', email)
+    .maybeSingle()
 
-  // Create user in Supabase Auth
-  const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
-    email,
-    password: temporaryPassword,
-    email_confirm: true,
-    user_metadata: {
-      first_name: input.firstName?.trim() || null,
-      last_name: input.lastName?.trim() || null,
-      full_name: [input.firstName?.trim(), input.lastName?.trim()].filter(Boolean).join(' ') || null,
-    },
-  })
+  let userId: string
 
-  if (createErr) {
-    throw new Error(`Failed to create account: ${createErr.message}`)
+  if (existingProfile) {
+    // User exists — just upgrade their role
+    userId = existingProfile.user_id
+  } else {
+    // User doesn't exist — create account via magic link invite
+    const { data: linkData, error: linkErr } = await supabase.auth.admin.generateLink({
+      type: 'magiclink',
+      email,
+    })
+
+    if (linkErr) throw new Error(`Failed to create account: ${linkErr.message}`)
+    userId = linkData.user.id
+
+    // Create profile
+    await supabase.from('profiles').upsert(
+      {
+        user_id: userId,
+        email,
+        email_verified_at: null,
+      },
+      { onConflict: 'user_id' }
+    )
+
+    // Send magic link to new user using our callback
+    const appUrl = getAppUrl()
+    const callbackUrl = `${appUrl}/join/callback?token_hash=${linkData.properties.hashed_token}&type=magiclink&mode=login&next=/dashboard`
+
+    const resend = getResendClient()
+    const fromAddress = process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
+
+    await resend.emails.send({
+      from: fromAddress,
+      to: email,
+      subject: `You've been added as a moderator — ${dept.name}`,
+      html: buildModeratorWelcomeEmailHtml({
+        departmentName: dept.name,
+        organizationName: orgName,
+        email,
+        loginUrl: callbackUrl,
+      }),
+    })
   }
 
-  const userId = newUser.user.id
-
-  // Add to org as department_admin
+  // Assign department_admin role
   await supabase.from('organization_members').upsert(
     { org_id: dept.org_id, user_id: userId, role: 'department_admin' },
     { onConflict: 'org_id,user_id' }
   )
 
-  // Add to department as department_admin
   await supabase.from('department_members').upsert(
     { org_id: dept.org_id, department_id: input.departmentId, user_id: userId, role: 'department_admin' },
     { onConflict: 'department_id,user_id' }
   )
 
-  // Create profile
-  await supabase.from('profiles').upsert(
-    {
-      user_id: userId,
-      email,
-      first_name: input.firstName?.trim() || null,
-      last_name: input.lastName?.trim() || null,
-      full_name: [input.firstName?.trim(), input.lastName?.trim()].filter(Boolean).join(' ') || null,
-      email_verified_at: new Date().toISOString(),
-    },
-    { onConflict: 'user_id' }
-  )
+  // If existing user, send notification email
+  if (existingProfile) {
+    const appUrl = getAppUrl()
+    const resend = getResendClient()
+    const fromAddress = process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
 
-  // Send welcome email
-  const appUrl = getAppUrl()
-  const resend = getResendClient()
-  const fromAddress = process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
-
-  await resend.emails.send({
-    from: fromAddress,
-    to: email,
-    subject: `Your Byte Teaching Moderator Account`,
-    html: buildModeratorWelcomeEmailHtml({
-      departmentName: dept.name,
-      organizationName: orgName,
-      email,
-      temporaryPassword,
-      loginUrl: `${appUrl}/login`,
-    }),
-  })
+    await resend.emails.send({
+      from: fromAddress,
+      to: email,
+      subject: `You've been added as a moderator — ${dept.name}`,
+      html: buildModeratorWelcomeEmailHtml({
+        departmentName: dept.name,
+        organizationName: orgName,
+        email,
+        loginUrl: `${appUrl}/login`,
+      }),
+    })
+  }
 
   revalidatePath('/super-admin')
-  return { success: true }
+  return { success: true, isNewUser: !existingProfile }
 }

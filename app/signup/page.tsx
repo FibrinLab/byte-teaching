@@ -144,7 +144,7 @@ export default function SignupPage() {
             </p>
             <p className="font-mono text-sm mt-2 text-center text-gray-600">
               Trainee with an invite?{' '}
-              <Link href="/trainee-login" className="underline text-black">
+              <Link href="/login" className="underline text-black">
                 Use trainee sign-in
               </Link>
             </p>

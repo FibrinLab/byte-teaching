@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Input } from '@/components/Input'
 import { Select } from '@/components/Select'
 import { Button } from '@/components/Button'
+import { useToast } from '@/components/ToastProvider'
 import { createModeratorAccount } from '@/app/actions/super-admin'
 
 interface CreateModeratorFormProps {
@@ -13,36 +14,29 @@ interface CreateModeratorFormProps {
 
 export function CreateModeratorForm({ departments }: CreateModeratorFormProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [email, setEmail] = useState('')
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
   const [departmentId, setDepartmentId] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    setError(null)
-    setSuccess(null)
 
     try {
-      await createModeratorAccount({
-        email,
-        departmentId,
-        firstName: firstName || undefined,
-        lastName: lastName || undefined,
-      })
+      const result = await createModeratorAccount({ email, departmentId })
 
-      setSuccess(`Moderator account created for ${email}. Credentials have been emailed.`)
+      if (result.isNewUser) {
+        showToast({ variant: 'success', title: 'Magic link sent', description: `${email} will be a moderator when they sign in.` })
+      } else {
+        showToast({ variant: 'success', title: 'Moderator granted', description: `${email} has been upgraded and notified.` })
+      }
+
       setEmail('')
-      setFirstName('')
-      setLastName('')
       setDepartmentId('')
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create moderator account')
+      showToast({ variant: 'error', title: 'Failed to create moderator', description: err instanceof Error ? err.message : undefined })
     } finally {
       setLoading(false)
     }
@@ -50,18 +44,6 @@ export function CreateModeratorForm({ departments }: CreateModeratorFormProps) {
 
   return (
     <div>
-      {error && (
-        <div className="mb-4 border border-red-500 bg-red-50 p-4">
-          <p className="font-mono text-sm text-red-800">{error}</p>
-        </div>
-      )}
-
-      {success && (
-        <div className="mb-4 border border-green-500 bg-green-50 p-4">
-          <p className="font-mono text-sm text-green-800">{success}</p>
-        </div>
-      )}
-
       <form onSubmit={handleSubmit} className="space-y-4">
         <Select
           label="Department"
@@ -82,24 +64,16 @@ export function CreateModeratorForm({ departments }: CreateModeratorFormProps) {
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          placeholder="moderator@example.com"
           required
         />
 
-        <div className="grid grid-cols-2 gap-4">
-          <Input
-            label="First Name (optional)"
-            value={firstName}
-            onChange={(e) => setFirstName(e.target.value)}
-          />
-          <Input
-            label="Last Name (optional)"
-            value={lastName}
-            onChange={(e) => setLastName(e.target.value)}
-          />
-        </div>
+        <p className="font-mono text-xs text-gray-500">
+          If the email is already registered, their role will be upgraded. If not, they will receive a magic link to create their account.
+        </p>
 
         <Button type="submit" disabled={loading || !departmentId || !email}>
-          {loading ? 'Creating...' : 'Create Moderator Account'}
+          {loading ? 'Processing...' : 'Grant Moderator Access'}
         </Button>
       </form>
     </div>

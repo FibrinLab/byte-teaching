@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/Button'
+import { useToast } from '@/components/ToastProvider'
 import { removeDepartmentMember } from '@/app/actions/departments'
 import type { DepartmentMemberWithProfile } from '@/app/actions/departments'
 
@@ -23,20 +24,20 @@ const PROTECTED_ROLES = new Set(['org_admin', 'department_admin'])
 
 export function DepartmentMembersPanel({ departmentId, departmentName, members }: DepartmentMembersPanelProps) {
   const router = useRouter()
+  const { showToast } = useToast()
   const [removingId, setRemovingId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   async function handleRemove(userId: string) {
     if (!confirm('Remove this member from the department?')) return
 
     setRemovingId(userId)
-    setError(null)
 
     try {
       await removeDepartmentMember(departmentId, userId)
+      showToast({ variant: 'success', title: 'Member removed' })
       router.refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove member')
+      showToast({ variant: 'error', title: 'Failed to remove member', description: err instanceof Error ? err.message : undefined })
     } finally {
       setRemovingId(null)
     }
@@ -51,12 +52,6 @@ export function DepartmentMembersPanel({ departmentId, departmentName, members }
       <p className="mb-3 font-mono text-sm text-gray-600">
         {members.length} member{members.length !== 1 ? 's' : ''} in {departmentName}
       </p>
-
-      {error && (
-        <div className="mb-3 border border-red-500 bg-red-50 p-3">
-          <p className="font-mono text-sm text-red-800">{error}</p>
-        </div>
-      )}
 
       <div className="overflow-x-auto">
         <table className="w-full border-collapse font-mono text-sm">

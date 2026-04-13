@@ -175,7 +175,7 @@ export function JoinDepartmentInviteForm({
           <Button type="submit" disabled={loading}>
             {loading ? 'Processing...' : 'Join Department'}
           </Button>
-          <Link href="/trainee-login" className="font-mono text-sm underline">
+          <Link href="/login" className="font-mono text-sm underline">
             Already have access? Sign in
           </Link>
         </div>

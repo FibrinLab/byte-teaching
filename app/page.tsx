@@ -61,17 +61,17 @@ export default async function Home() {
               <div>
                 <h2 className="text-xl sm:text-2xl font-mono font-bold mb-3">Get Started</h2>
                 <p className="font-mono text-sm sm:text-base text-gray-700 mb-6">
-                  Staff accounts use password login. Trainees invited through departments use passwordless sign-in.
+                  Sign in with your email to access your dashboard. New to the platform? Join using your department code.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <Link href="/login">
                     <Button className="w-full sm:w-auto px-8 py-3 text-base">
-                      Staff Sign In
+                      Sign In
                     </Button>
                   </Link>
-                  <Link href="/trainee-login">
+                  <Link href="/join/dept">
                     <Button variant="secondary" className="w-full sm:w-auto px-8 py-3 text-base">
-                      Trainee Sign In
+                      Join a Department
                     </Button>
                   </Link>
                 </div>
