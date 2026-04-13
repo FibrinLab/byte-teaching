@@ -154,6 +154,7 @@ export default async function SettingsPage() {
                         Members
                       </h3>
                       <DepartmentMembersPanel
+                        departmentId={department.id}
                         departmentName={department.name}
                         members={members}
                       />

@@ -170,34 +170,39 @@ export async function getDepartmentMembersWithProfiles(
   const orgId = await requireOrg()
 
   const db = await getServiceDb()
-  const { data, error } = await db
+
+  const { data: members, error: memError } = await db
     .from('department_members')
-    .select('user_id, role, grade, created_at, profiles:user_id(email, full_name, first_name, last_name)')
+    .select('user_id, role, grade, created_at')
     .eq('department_id', departmentId)
     .eq('org_id', orgId)
     .order('created_at', { ascending: true })
 
-  if (error) throw new Error(`Failed to fetch department members: ${error.message}`)
+  if (memError) throw new Error(`Failed to fetch department members: ${memError.message}`)
+  if (!members || members.length === 0) return []
 
-  type Row = {
-    user_id: string
-    role: UserRole
-    grade: string | null
-    created_at: string
-    profiles: { email: string; full_name: string | null; first_name: string | null; last_name: string | null } | { email: string; full_name: string | null; first_name: string | null; last_name: string | null }[] | null
-  }
+  const userIds = members.map((m) => m.user_id)
 
-  return ((data as Row[] | null) ?? []).map((row) => {
-    const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles
+  const { data: profiles } = await db
+    .from('profiles')
+    .select('user_id, email, full_name, first_name, last_name')
+    .in('user_id', userIds)
+
+  const profileMap = new Map(
+    (profiles ?? []).map((p) => [p.user_id, p])
+  )
+
+  return members.map((m) => {
+    const profile = profileMap.get(m.user_id)
     return {
-      user_id: row.user_id,
+      user_id: m.user_id,
       email: profile?.email ?? '',
       full_name: profile?.full_name ?? null,
       first_name: profile?.first_name ?? null,
       last_name: profile?.last_name ?? null,
-      grade: row.grade as TraineeGrade | null,
-      role: row.role,
-      joined_at: row.created_at,
+      grade: m.grade as TraineeGrade | null,
+      role: m.role,
+      joined_at: m.created_at,
     }
   })
 }
@@ -218,5 +223,6 @@ export async function removeDepartmentMember(
 
   revalidatePath(`/departments/${departmentId}`)
   revalidatePath('/admin')
+  revalidatePath('/settings')
   return { success: true }
 }
