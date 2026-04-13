@@ -15,8 +15,7 @@ import { SuperAdminDepartmentForm } from '@/components/SuperAdminDepartmentForm'
 import { SuperAdminOrganizationsPanel } from '@/components/SuperAdminOrganizationsPanel'
 import { SuperAdminUsersPanel } from '@/components/SuperAdminUsersPanel'
 import { SuperAdminTabs } from '@/components/SuperAdminTabs'
-import { JoinRequestsPanel } from '@/components/JoinRequestsPanel'
-import { getAllPendingDepartmentJoinRequests } from '@/app/actions/join-requests'
+import { CreateModeratorForm } from '@/components/CreateModeratorForm'
 
 export default async function SuperAdminPage() {
   const user = await getCurrentUser()
@@ -35,8 +34,8 @@ export default async function SuperAdminPage() {
   const superAdmins = await getSuperAdmins()
   const memberships = await getAllDepartmentMemberships()
   const orgMemberships = await getAllOrganizationMemberships()
-  const joinRequests = await getAllPendingDepartmentJoinRequests()
   const superAdminIds = superAdmins.map(admin => admin.user_id)
+
   const departmentsById = departments.reduce(
     (acc: Record<string, { id: string; name: string }>, dept) => {
       acc[dept.id] = { id: dept.id, name: dept.name }
@@ -44,10 +43,11 @@ export default async function SuperAdminPage() {
     },
     {}
   )
+
   const departmentMembershipsByUser = memberships.reduce(
     (acc: Record<string, { department_id: string; department_name: string; role: string }[]>, m: any) => {
-      const dept = (m.departments && !Array.isArray(m.departments)) 
-        ? { id: m.departments.id, name: m.departments.name } 
+      const dept = (m.departments && !Array.isArray(m.departments))
+        ? { id: m.departments.id, name: m.departments.name }
         : departmentsById[m.department_id]
       if (!acc[m.user_id]) acc[m.user_id] = []
       acc[m.user_id].push({
@@ -59,11 +59,12 @@ export default async function SuperAdminPage() {
     },
     {}
   )
+
   const organizationMembershipsByUser = orgMemberships.reduce(
     (acc: Record<string, { org_id: string; org_name: string; role: string }[]>, m: any) => {
       if (!acc[m.user_id]) acc[m.user_id] = []
-      const org = (m.organizations && !Array.isArray(m.organizations)) 
-        ? m.organizations 
+      const org = (m.organizations && !Array.isArray(m.organizations))
+        ? m.organizations
         : null
       acc[m.user_id].push({
         org_id: m.org_id,
@@ -74,6 +75,7 @@ export default async function SuperAdminPage() {
     },
     {}
   )
+
   const departmentsByOrg = departments.reduce(
     (acc: Record<string, { id: string; name: string; org_id: string }[]>, dept) => {
       if (!acc[dept.org_id]) acc[dept.org_id] = []
@@ -82,9 +84,25 @@ export default async function SuperAdminPage() {
     },
     {}
   )
+
   const organizationsWithDepartments = organizations.map(org => ({
     ...org,
     departments: departmentsByOrg[org.id] || [],
+  }))
+
+  // Build department list with org names for moderator form
+  const orgsById = organizations.reduce(
+    (acc: Record<string, string>, org) => {
+      acc[org.id] = org.name
+      return acc
+    },
+    {}
+  )
+
+  const departmentsWithOrg = departments.map((d) => ({
+    id: d.id,
+    name: d.name,
+    orgName: orgsById[d.org_id] || 'Unknown',
   }))
 
   return (
@@ -98,7 +116,7 @@ export default async function SuperAdminPage() {
             <div className="space-y-6">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
                 <Card>
-                  <h2 className="text-xl font-mono font-bold mb-4">Create Organization</h2>
+                  <h2 className="text-xl font-mono font-bold mb-4">Create Organisation</h2>
                   <SuperAdminOrganizationForm />
                 </Card>
 
@@ -109,10 +127,20 @@ export default async function SuperAdminPage() {
               </div>
 
               <Card>
-                <h2 className="text-xl font-mono font-bold mb-4">Organizations</h2>
+                <h2 className="text-xl font-mono font-bold mb-4">Organisations</h2>
                 <SuperAdminOrganizationsPanel organizations={organizationsWithDepartments} />
               </Card>
             </div>
+          }
+          moderators={
+            <Card>
+              <h2 className="text-xl font-mono font-bold mb-2">Create Moderator Account</h2>
+              <p className="font-mono text-sm text-gray-600 mb-6">
+                Create a login for a department moderator. They will receive an email with their
+                temporary password and a link to sign in.
+              </p>
+              <CreateModeratorForm departments={departmentsWithOrg} />
+            </Card>
           }
           users={
             <Card>
@@ -125,12 +153,6 @@ export default async function SuperAdminPage() {
                 organizationMembershipsByUser={organizationMembershipsByUser}
                 currentUserId={user.id}
               />
-            </Card>
-          }
-          notifications={
-            <Card>
-              <h2 className="text-xl font-mono font-bold mb-4">Join Requests</h2>
-              <JoinRequestsPanel joinRequests={joinRequests} />
             </Card>
           }
         />

@@ -19,5 +19,6 @@ export async function NavShell() {
     }
   }
 
-  return <Nav adminLink={adminLink} roleLabel={roleLabel} />
+  const superAdmin = userId ? await isSuperAdmin() : false
+  return <Nav adminLink={adminLink} roleLabel={roleLabel} isSuperAdmin={superAdmin} />
 }

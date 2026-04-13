@@ -15,21 +15,24 @@ interface AdminLink {
 interface NavProps {
   adminLink?: AdminLink | null
   roleLabel?: string | null
+  isSuperAdmin?: boolean
 }
 
-export function Nav({ adminLink, roleLabel }: NavProps) {
+export function Nav({ adminLink, roleLabel, isSuperAdmin: superAdmin }: NavProps) {
   const router = useRouter()
   const pathname = usePathname()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
-  const navLinks = [
-    { href: '/dashboard', label: 'Dashboard' },
-    { href: '/audit', label: 'Audit' },
-    { href: '/settings', label: 'Settings' },
-    ...(adminLink ? [adminLink] : []),
-  ]
+  const navLinks = superAdmin
+    ? [{ href: '/super-admin', label: 'Super Admin' }]
+    : [
+        { href: '/dashboard', label: 'Dashboard' },
+        { href: '/audit', label: 'Audit' },
+        { href: '/settings', label: 'Settings' },
+        ...(adminLink ? [adminLink] : []),
+      ]
 
   function getNavLinkClass(href: string) {
     const isActive = pathname === href || pathname.startsWith(`${href}/`)

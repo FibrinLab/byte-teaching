@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { getCurrentUser, getCurrentOrgId, isOrgAdmin } from '@/lib/auth'
+import { getCurrentUser, getCurrentOrgId, isOrgAdmin, isSuperAdmin } from '@/lib/auth'
 import { NavShell } from '@/components/NavShell'
 import { Card } from '@/components/Card'
 import { getSessionsForOrg, getCalendarSubscriptionUrl } from '@/app/actions/sessions'
@@ -14,6 +14,10 @@ export default async function DashboardPage() {
   
   if (!user) {
     redirect('/login')
+  }
+
+  if (await isSuperAdmin()) {
+    redirect('/super-admin')
   }
 
   const orgId = await getCurrentOrgId()

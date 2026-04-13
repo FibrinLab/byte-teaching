@@ -3,6 +3,9 @@
 import { revalidatePath } from 'next/cache'
 import { requireAuth, requireSuperAdmin } from '@/lib/auth'
 import { createSupabaseServiceClient } from '@/lib/supabase/server'
+import { getResendClient } from '@/lib/resend'
+import { buildModeratorWelcomeEmailHtml } from '@/lib/email-templates'
+import { getAppUrl } from '@/lib/app-url'
 import * as superAdminsDb from '@/lib/db/super-admins'
 import * as onboardingDb from '@/lib/db/onboarding'
 import { DbNotFoundError } from '@/lib/db'
@@ -139,6 +142,108 @@ export async function grantSuperAdmin(userId: string) {
 export async function revokeSuperAdmin(userId: string) {
   await requireSuperAdmin()
   await superAdminsDb.deleteSuperAdmin(userId)
+  revalidatePath('/super-admin')
+  return { success: true }
+}
+
+function generateTemporaryPassword(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$'
+  let password = ''
+  for (let i = 0; i < 12; i++) {
+    password += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return password
+}
+
+export async function createModeratorAccount(input: {
+  email: string
+  departmentId: string
+  firstName?: string
+  lastName?: string
+}) {
+  await requireSuperAdmin()
+
+  const email = input.email.trim().toLowerCase()
+  if (!email) throw new Error('Email is required')
+
+  const supabase = await createSupabaseServiceClient()
+
+  // Look up department to get org_id
+  const { data: dept, error: deptErr } = await supabase
+    .from('departments')
+    .select('id, name, org_id, organizations:org_id(name)')
+    .eq('id', input.departmentId)
+    .single()
+
+  if (deptErr || !dept) throw new DbNotFoundError('Department not found')
+
+  const org = Array.isArray(dept.organizations) ? dept.organizations[0] : dept.organizations
+  const orgName = org?.name ?? 'Unknown'
+
+  // Generate temporary password
+  const temporaryPassword = generateTemporaryPassword()
+
+  // Create user in Supabase Auth
+  const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
+    email,
+    password: temporaryPassword,
+    email_confirm: true,
+    user_metadata: {
+      first_name: input.firstName?.trim() || null,
+      last_name: input.lastName?.trim() || null,
+      full_name: [input.firstName?.trim(), input.lastName?.trim()].filter(Boolean).join(' ') || null,
+    },
+  })
+
+  if (createErr) {
+    throw new Error(`Failed to create account: ${createErr.message}`)
+  }
+
+  const userId = newUser.user.id
+
+  // Add to org as department_admin
+  await supabase.from('organization_members').upsert(
+    { org_id: dept.org_id, user_id: userId, role: 'department_admin' },
+    { onConflict: 'org_id,user_id' }
+  )
+
+  // Add to department as department_admin
+  await supabase.from('department_members').upsert(
+    { org_id: dept.org_id, department_id: input.departmentId, user_id: userId, role: 'department_admin' },
+    { onConflict: 'department_id,user_id' }
+  )
+
+  // Create profile
+  await supabase.from('profiles').upsert(
+    {
+      user_id: userId,
+      email,
+      first_name: input.firstName?.trim() || null,
+      last_name: input.lastName?.trim() || null,
+      full_name: [input.firstName?.trim(), input.lastName?.trim()].filter(Boolean).join(' ') || null,
+      email_verified_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' }
+  )
+
+  // Send welcome email
+  const appUrl = getAppUrl()
+  const resend = getResendClient()
+  const fromAddress = process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
+
+  await resend.emails.send({
+    from: fromAddress,
+    to: email,
+    subject: `Your Byte Teaching Moderator Account`,
+    html: buildModeratorWelcomeEmailHtml({
+      departmentName: dept.name,
+      organizationName: orgName,
+      email,
+      temporaryPassword,
+      loginUrl: `${appUrl}/login`,
+    }),
+  })
+
   revalidatePath('/super-admin')
   return { success: true }
 }
