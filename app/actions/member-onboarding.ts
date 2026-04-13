@@ -699,28 +699,33 @@ export async function sendPasswordlessLoginLink(emailInput: string) {
     throw new Error('Email is required')
   }
 
-  const profile = await onboardingDb.findProfileByEmail(email)
-
-  if (!profile?.email_verified_at) {
-    return {
-      success: true,
-      message: 'If that email has access, a sign-in link has been sent.',
-    }
-  }
-
   // Auth-plane: generate magic link via GoTrue.
+  // If user doesn't exist, generateLink with type 'magiclink' will create them.
   const serviceClient = await createSupabaseServiceClient()
   const baseUrl = await getAppUrlFromHeaders()
-  const { data, error } = await serviceClient.auth.admin.generateLink({
+
+  // Try magiclink first (for existing users)
+  let linkResult = await serviceClient.auth.admin.generateLink({
     type: 'magiclink',
     email,
   })
+
+  // If user doesn't exist, create via invite link
+  if (linkResult.error && linkResult.error.message.toLowerCase().includes('not found')) {
+    linkResult = await serviceClient.auth.admin.generateLink({
+      type: 'invite',
+      email,
+    })
+  }
+
+  const { data, error } = linkResult
 
   if (error) {
     throw new Error(`Failed to generate sign-in link: ${error.message}`)
   }
 
-  const inviteUrl = buildCallbackLink(baseUrl, data.properties.hashed_token, 'magiclink', {
+  const linkType = data.properties.verification_type === 'invite' ? 'invite' : 'magiclink'
+  const inviteUrl = buildCallbackLink(baseUrl, data.properties.hashed_token, linkType, {
     mode: 'login',
     next: '/dashboard',
   })
@@ -728,9 +733,10 @@ export async function sendPasswordlessLoginLink(emailInput: string) {
   const resend = getResendClient()
   const fromAddress =
     process.env.RESEND_FROM_EMAIL || 'Byte Teaching <onboarding@resend.dev>'
+  const profile = await onboardingDb.findProfileByEmail(email)
   const firstName =
-    (profile.first_name && profile.first_name.trim()) ||
-    (profile.full_name && profile.full_name.trim().split(' ')[0]) ||
+    (profile?.first_name && profile.first_name.trim()) ||
+    (profile?.full_name && profile.full_name.trim().split(' ')[0]) ||
     null
 
   const { error: emailError } = await resend.emails.send({
