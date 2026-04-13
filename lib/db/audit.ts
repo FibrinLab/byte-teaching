@@ -245,3 +245,97 @@ export async function countPendingJoinRequestsForDepartments(
   if (error) throw toDbError('Failed to count pending join requests', error)
   return count ?? 0
 }
+
+export interface AuditMemberDetail {
+  user_id: string
+  email: string
+  full_name: string | null
+  grade: string | null
+  role: string
+  sessions_attended: number
+  sessions_total: number
+  attendance_pct: number
+}
+
+export async function listMemberAttendanceDetails(
+  orgId: string,
+  departmentIds: string[]
+): Promise<AuditMemberDetail[]> {
+  if (departmentIds.length === 0) return []
+  const db = await getServiceDb()
+
+  // Get all members in these departments
+  const { data: members, error: memErr } = await db
+    .from('department_members')
+    .select('user_id, role, grade')
+    .in('department_id', departmentIds)
+
+  if (memErr) throw toDbError('Failed to list members', memErr)
+  if (!members || members.length === 0) return []
+
+  // Dedupe by user_id
+  const userMap = new Map<string, { role: string; grade: string | null }>()
+  for (const m of members) {
+    if (!userMap.has(m.user_id)) {
+      userMap.set(m.user_id, { role: m.role, grade: m.grade })
+    }
+  }
+  const userIds = Array.from(userMap.keys())
+
+  // Get profiles
+  const { data: profiles } = await db
+    .from('profiles')
+    .select('user_id, email, full_name')
+    .in('user_id', userIds)
+
+  const profileMap = new Map(
+    (profiles ?? []).map((p) => [p.user_id, p])
+  )
+
+  // Get total published past sessions in these departments
+  const now = new Date().toISOString()
+  const { data: sessions } = await db
+    .from('sessions')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('status', 'PUBLISHED')
+    .in('department_id', departmentIds)
+    .lte('date_start', now)
+
+  const sessionIds = (sessions ?? []).map((s) => s.id)
+  const totalSessions = sessionIds.length
+
+  // Get attendance for all users in those sessions
+  let attendanceMap = new Map<string, number>()
+  if (sessionIds.length > 0) {
+    const { data: attendance } = await db
+      .from('attendance')
+      .select('user_id, status')
+      .in('session_id', sessionIds)
+      .in('user_id', userIds)
+
+    if (attendance) {
+      for (const a of attendance) {
+        if (a.status === 'PRESENT' || a.status === 'LATE') {
+          attendanceMap.set(a.user_id, (attendanceMap.get(a.user_id) ?? 0) + 1)
+        }
+      }
+    }
+  }
+
+  return userIds.map((uid) => {
+    const profile = profileMap.get(uid)
+    const member = userMap.get(uid)!
+    const attended = attendanceMap.get(uid) ?? 0
+    return {
+      user_id: uid,
+      email: profile?.email ?? '',
+      full_name: profile?.full_name ?? null,
+      grade: member.grade,
+      role: member.role,
+      sessions_attended: attended,
+      sessions_total: totalSessions,
+      attendance_pct: totalSessions > 0 ? Math.round((attended / totalSessions) * 100) : 0,
+    }
+  })
+}

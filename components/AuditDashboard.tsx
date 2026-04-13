@@ -155,7 +155,7 @@ export function AuditDashboard({ data }: AuditDashboardProps) {
         <AuditCertificateTable certificates={data.certificates} />
       )}
       {activeTab === 'members' && (
-        <AuditMemberPanel summary={data.memberSummary} />
+        <AuditMemberPanel summary={data.memberSummary} members={data.memberDetails} />
       )}
     </div>
   )

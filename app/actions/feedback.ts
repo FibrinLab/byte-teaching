@@ -10,6 +10,7 @@ import {
   buildCertificateEmailHtml,
   buildTeacherFeedbackEmailHtml,
 } from '@/lib/email-templates'
+import { createSupabaseServiceClient } from '@/lib/supabase/server'
 import {
   buildFeedbackSubmission,
   extractTextResponses,
@@ -521,10 +522,107 @@ export async function releaseTeacherFeedback(sessionId: string) {
     }
   }
 
+  // -----------------------------------------------------------------------
+  // Teacher attendance: ensure all teachers have TEACHER evidence
+  // -----------------------------------------------------------------------
+  for (const teacher of allTeachers) {
+    if (!teacher.userId) continue
+    try {
+      await attendanceDb.insertAttendanceEvidence({
+        orgId,
+        sessionId,
+        departmentId: session.department_id,
+        userId: teacher.userId,
+        externalEmail: null,
+        source: 'TEACHER',
+        observedAt: session.date_start,
+        metadata: { assigned_as_teacher: true },
+        createdBy: null,
+      })
+    } catch {
+      // Evidence may already exist — non-fatal
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Trainee reports: send attendance report + certificate to each attendee
+  // -----------------------------------------------------------------------
+  const serviceClient = await createSupabaseServiceClient()
+
+  // Get attendees with PRESENT status (teachers excluded — they got their email above)
+  const { data: attendees } = await serviceClient
+    .from('attendance')
+    .select('user_id')
+    .eq('session_id', sessionId)
+    .not('user_id', 'is', null)
+    .eq('status', 'PRESENT')
+
+  let traineesSent = 0
+  const teacherUserIds = new Set(allTeachers.filter((t) => t.userId).map((t) => t.userId))
+
+  if (attendees && attendees.length > 0) {
+    for (const attendee of attendees) {
+      if (teacherUserIds.has(attendee.user_id)) continue
+
+      try {
+        const { data: profile } = await serviceClient
+          .from('profiles')
+          .select('email, full_name, first_name, last_name')
+          .eq('user_id', attendee.user_id)
+          .single()
+
+        if (!profile?.email) continue
+
+        const recipientName =
+          profile.full_name ||
+          [profile.first_name, profile.last_name].filter(Boolean).join(' ') ||
+          profile.email
+
+        // Generate or find certificate
+        const existingCert = await certificatesDb.findCertificateByUserAndSession(
+          attendee.user_id, sessionId
+        )
+
+        let certCode: string
+        if (existingCert) {
+          certCode = existingCert.certificate_code
+        } else {
+          certCode = generateCertificateCode()
+          await certificatesDb.insertCertificate({
+            orgId,
+            departmentId: session.department_id,
+            sessionId,
+            userId: attendee.user_id,
+            role: 'ATTENDEE',
+            certificateCode: certCode,
+            recipientName,
+          })
+        }
+
+        const traineeHtml = buildCertificateEmailHtml(session.title, recipientName)
+
+        await resend.emails.send({
+          from: fromAddress,
+          to: profile.email,
+          subject: `Your Attendance Certificate — ${session.title}`,
+          html: traineeHtml,
+        })
+
+        traineesSent++
+      } catch (err) {
+        console.error(`Failed to send trainee certificate to ${attendee.user_id}:`, err)
+      }
+    }
+  }
+
+  // Mark session report as sent
+  await sessionsDb.markSessionReportSent(sessionId)
+
   revalidatePath(`/sessions/${sessionId}/manage`)
 
   return {
     sentCount,
     totalTeachers: allTeachers.length,
+    traineesSent,
   }
 }

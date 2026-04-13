@@ -175,6 +175,7 @@ export interface Session {
   attendance_locked?: boolean
   attendance_locked_at?: string | null
   attendance_locked_by?: string | null
+  report_sent_at?: string | null
 }
 
 export interface SessionTeacher {
@@ -238,5 +239,6 @@ export interface Certificate {
   issued_at: string
   pdf_storage_path: string | null
   certificate_code: string
+  recipient_name: string | null
   created_at: string
 }

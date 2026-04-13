@@ -122,10 +122,6 @@ export default async function DashboardPage() {
             <SessionCalendar sessions={departmentSessions} subscriptionUrl={deptCalendarUrl} />
           </section>
 
-          <section>
-            <h2 className="text-xl sm:text-2xl font-mono font-bold mb-4">My Activity</h2>
-            <PersonalDashboard sessions={mySessions} feedback={myFeedback} attendance={myAttendance} />
-          </section>
         </div>
       </div>
     )
@@ -188,10 +184,6 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        <section className="mt-6 sm:mt-8">
-          <h2 className="text-xl sm:text-2xl font-mono font-bold mb-4">My Activity</h2>
-          <PersonalDashboard sessions={mySessions} feedback={myFeedback} attendance={myAttendance} />
-        </section>
       </div>
     </div>
   )

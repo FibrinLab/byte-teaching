@@ -45,11 +45,23 @@ export interface AuditMemberSummary {
   pendingJoinRequests: number
 }
 
+export interface AuditMemberRow {
+  user_id: string
+  email: string
+  full_name: string | null
+  grade: string | null
+  role: string
+  sessions_attended: number
+  sessions_total: number
+  attendance_pct: number
+}
+
 export interface AuditPageData {
   stats: AuditSummaryStats
   recentSessions: AuditSessionRow[]
   certificates: AuditCertificateRow[]
   memberSummary: AuditMemberSummary
+  memberDetails: AuditMemberRow[]
   departmentNames: { id: string; name: string }[]
 }
 
@@ -91,13 +103,14 @@ export async function getAuditPageData(): Promise<AuditPageData> {
     departmentNames = moderatedDepts
   }
 
-  const [stats, recentSessions, certificates, memberRoles, pendingJoinRequests] =
+  const [stats, recentSessions, certificates, memberRoles, pendingJoinRequests, memberDetails] =
     await Promise.all([
       computeStats(orgId, departmentIds),
       buildRecentSessions(orgId, departmentIds),
       buildCertificates(departmentIds),
       auditDb.listDepartmentMemberRoles(departmentIds),
       auditDb.countPendingJoinRequestsForDepartments(departmentIds),
+      auditDb.listMemberAttendanceDetails(orgId, departmentIds),
     ])
 
   const memberSummary: AuditMemberSummary = {
@@ -115,6 +128,7 @@ export async function getAuditPageData(): Promise<AuditPageData> {
     recentSessions,
     certificates,
     memberSummary,
+    memberDetails,
     departmentNames,
   }
 }
@@ -285,4 +299,99 @@ export async function generateAuditReportPDF(
   const base64 = Buffer.from(buffer).toString('base64')
   const dateLabel = [dateFrom, dateTo].filter(Boolean).join('_to_') || 'all-time'
   return { base64, filename: `audit-report-${dateLabel}.pdf` }
+}
+
+export async function generateMemberAttendanceReportPDF(
+  userId: string
+): Promise<{ base64: string; filename: string }> {
+  await requireAuth()
+  const orgId = await requireOrg()
+
+  const orgAdmin = await isOrgAdmin()
+  const superAdmin = await isSuperAdmin()
+
+  let departmentIds: string[] = []
+  let departmentNames: string[] = []
+
+  if (orgAdmin || superAdmin) {
+    const allDepts = await getDepartments()
+    departmentIds = allDepts.map((d) => d.id)
+    departmentNames = allDepts.map((d) => d.name)
+  } else {
+    const moderatedDepts = await getMyModeratedDepartments()
+    departmentIds = moderatedDepts.map((d) => d.id)
+    departmentNames = moderatedDepts.map((d) => d.name)
+  }
+
+  // Get member profile
+  const supabase = await createSupabaseServiceClient()
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('email, full_name, first_name, last_name, grade')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  const memberName = profile?.full_name || [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || profile?.email || userId
+
+  // Get past published sessions
+  const now = new Date().toISOString()
+  const { data: sessions } = await supabase
+    .from('sessions')
+    .select('id, title, date_start, department_id')
+    .eq('org_id', orgId)
+    .eq('status', 'PUBLISHED')
+    .in('department_id', departmentIds)
+    .lte('date_start', now)
+    .order('date_start', { ascending: false })
+
+  // Get attendance for this user
+  const sessionIds = (sessions ?? []).map((s) => s.id)
+  let attendanceMap = new Map<string, { status: string; source: string | null }>()
+  if (sessionIds.length > 0) {
+    const { data: attendance } = await supabase
+      .from('attendance')
+      .select('session_id, status, primary_source')
+      .eq('user_id', userId)
+      .in('session_id', sessionIds)
+
+    if (attendance) {
+      for (const a of attendance) {
+        attendanceMap.set(a.session_id, { status: a.status, source: a.primary_source })
+      }
+    }
+  }
+
+  const sessionRows = (sessions ?? []).map((s) => {
+    const att = attendanceMap.get(s.id)
+    return {
+      title: s.title,
+      date: s.date_start,
+      status: att?.status ?? 'ABSENT',
+      source: att?.source ?? null,
+    }
+  })
+
+  const attended = sessionRows.filter((s) => s.status === 'PRESENT' || s.status === 'LATE').length
+  const total = sessionRows.length
+  const pct = total > 0 ? Math.round((attended / total) * 100) : 0
+
+  const { renderToBuffer } = await import('@react-pdf/renderer')
+  const { buildMemberReportDocument } = await import('@/lib/audit-report/pdf')
+
+  const buffer = await renderToBuffer(
+    buildMemberReportDocument({
+      memberName,
+      email: profile?.email ?? '',
+      grade: profile?.grade ?? null,
+      departmentNames,
+      attended,
+      total,
+      pct,
+      sessions: sessionRows,
+    })
+  )
+
+  const base64 = Buffer.from(buffer).toString('base64')
+  const safeName = memberName.replace(/\s+/g, '-').toLowerCase()
+  return { base64, filename: `attendance-${safeName}.pdf` }
 }

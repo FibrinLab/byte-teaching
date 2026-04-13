@@ -1,5 +1,5 @@
 import { getCertificateByCode } from '@/app/actions/certificates'
-import { Card } from '@/components/Card'
+import Image from 'next/image'
 
 export default async function VerifyCertificatePage({
   params,
@@ -10,40 +10,107 @@ export default async function VerifyCertificatePage({
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-8">
-      <div className="max-w-2xl w-full">
-        <Card>
-          {certificate ? (
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-mono font-bold mb-6 sm:mb-8">Certificate Verification</h1>
-              <div className="space-y-4 font-mono text-sm">
-                <div className="p-4 border border-green-500 bg-green-50">
-                  <p className="font-bold text-green-800">✓ Valid Certificate</p>
-                </div>
-                <div className="space-y-2">
-                  <p><strong>Certificate Code:</strong> {certificate.certificate_code}</p>
-                  <p><strong>Session:</strong> {certificate.sessions?.title || 'Unknown'}</p>
-                  <p><strong>Department:</strong> {certificate.departments?.name || 'Unknown'}</p>
-                  <p><strong>Role:</strong> {certificate.certificate_role}</p>
-                  <p><strong>Issued:</strong> {new Date(certificate.issued_at).toLocaleDateString('en-GB')}</p>
-                  {certificate.sessions?.date_start && (
-                    <p><strong>Session Date:</strong> {new Date(certificate.sessions.date_start).toLocaleDateString('en-GB')}</p>
+      <div className="max-w-lg w-full">
+        {/* Logo */}
+        <div className="flex justify-center mb-6">
+          <Image
+            src="/assets/byte_logo.png"
+            alt="Byte Teaching"
+            width={120}
+            height={80}
+            className="w-auto h-auto"
+          />
+        </div>
+
+        {certificate ? (
+          <div className="border border-black bg-white">
+            {/* Success banner */}
+            <div className="bg-green-50 border-b border-green-200 px-6 py-4">
+              <div className="flex items-center gap-2">
+                <span className="text-green-600 text-xl">&#10003;</span>
+                <span className="font-mono text-sm font-bold text-green-800">
+                  Valid Certificate
+                </span>
+              </div>
+            </div>
+
+            {/* Certificate ID */}
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+              <p className="font-mono text-xs text-gray-500 uppercase tracking-wider">
+                Certificate ID
+              </p>
+              <p className="font-mono text-lg font-bold tracking-[0.2em] mt-1">
+                {certificate.certificate_code}
+              </p>
+            </div>
+
+            {/* Details */}
+            <div className="px-6 py-5 space-y-4">
+              {certificate.recipient_name && (
+                <Detail label="Recipient" value={certificate.recipient_name} />
+              )}
+              <Detail
+                label="Role"
+                value={certificate.certificate_role === 'TEACHER' ? 'Teacher' : 'Attendee'}
+              />
+              <Detail
+                label="Session"
+                value={certificate.sessions?.title || 'Unknown'}
+              />
+              {certificate.sessions?.date_start && (
+                <Detail
+                  label="Session Date"
+                  value={new Date(certificate.sessions.date_start).toLocaleDateString(
+                    'en-GB',
+                    { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }
                   )}
-                </div>
+                />
+              )}
+              {certificate.departments?.name && (
+                <Detail label="Department" value={certificate.departments.name} />
+              )}
+              {certificate.organizations?.name && (
+                <Detail label="Organisation" value={certificate.organizations.name} />
+              )}
+              {certificate.departments?.lead_name && (
+                <Detail label="Teaching Lead" value={certificate.departments.lead_name} />
+              )}
+              <Detail
+                label="Issued"
+                value={new Date(certificate.issued_at).toLocaleDateString(
+                  'en-GB',
+                  { day: 'numeric', month: 'long', year: 'numeric' }
+                )}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="border border-black bg-white">
+            <div className="bg-red-50 border-b border-red-200 px-6 py-4">
+              <div className="flex items-center gap-2">
+                <span className="text-red-600 text-xl">&#10007;</span>
+                <span className="font-mono text-sm font-bold text-red-800">
+                  Certificate Not Found
+                </span>
               </div>
             </div>
-          ) : (
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-mono font-bold mb-6 sm:mb-8">Certificate Verification</h1>
-              <div className="p-4 border border-red-500 bg-red-50">
-                <p className="font-bold text-red-800">✗ Invalid Certificate</p>
-                <p className="font-mono text-sm text-red-700 mt-2">
-                  The certificate code "{params.certificateId}" was not found.
-                </p>
-              </div>
+            <div className="px-6 py-5">
+              <p className="font-mono text-sm text-gray-600">
+                The certificate code <strong className="tracking-wider">{params.certificateId}</strong> could not be verified. Please check the code and try again.
+              </p>
             </div>
-          )}
-        </Card>
+          </div>
+        )}
       </div>
+    </div>
+  )
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="font-mono text-xs text-gray-500 uppercase tracking-wider">{label}</p>
+      <p className="font-mono text-sm font-bold mt-0.5">{value}</p>
     </div>
   )
 }

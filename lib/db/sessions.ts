@@ -346,3 +346,36 @@ export async function searchOrgMemberProfiles(
   if (error) throw toDbError('Failed to search org members', error)
   return (profiles ?? []) as OrgMemberProfile[]
 }
+
+export async function listSessionsNeedingReport(): Promise<
+  { id: string; org_id: string; department_id: string; title: string; date_start: string; date_end: string }[]
+> {
+  const { getServiceDb } = await import('./client')
+  const db = await getServiceDb()
+
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await db
+    .from('sessions')
+    .select('id, org_id, department_id, title, date_start, date_end')
+    .eq('status', 'PUBLISHED')
+    .lte('date_end', cutoff)
+    .is('report_sent_at', null)
+    .order('date_end', { ascending: true })
+    .limit(10)
+
+  if (error) throw toDbError('Failed to list sessions needing report', error)
+  return data ?? []
+}
+
+export async function markSessionReportSent(sessionId: string): Promise<void> {
+  const { getServiceDb } = await import('./client')
+  const db = await getServiceDb()
+
+  const { error } = await db
+    .from('sessions')
+    .update({ report_sent_at: new Date().toISOString() })
+    .eq('id', sessionId)
+
+  if (error) throw toDbError('Failed to mark session report sent', error)
+}

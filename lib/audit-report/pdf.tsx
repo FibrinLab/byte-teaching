@@ -107,3 +107,89 @@ export function buildAuditReportDocument(props: AuditReportProps) {
     </Document>
   )
 }
+
+// ---------------------------------------------------------------------------
+// Per-member attendance report
+// ---------------------------------------------------------------------------
+
+interface MemberReportProps {
+  memberName: string
+  email: string
+  grade: string | null
+  departmentNames: string[]
+  attended: number
+  total: number
+  pct: number
+  sessions: { title: string; date: string; status: string; source: string | null }[]
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  SELF_CHECKIN: 'Self',
+  GROUP_CODE: 'Code',
+  FEEDBACK: 'Feedback',
+  TEACHER: 'Teacher',
+  TEAMS: 'Teams',
+}
+
+export function buildMemberReportDocument(props: MemberReportProps) {
+  const { memberName, email, grade, departmentNames, attended, total, pct, sessions } = props
+
+  return (
+    <Document>
+      <Page size="A4" style={styles.page}>
+        <Text style={styles.title}>Attendance Report</Text>
+        <Text style={styles.subtitle}>{memberName}</Text>
+        <Text style={styles.subtitle}>
+          {email}{grade ? ` — ${grade}` : ''}
+        </Text>
+        <Text style={styles.subtitle}>
+          {departmentNames.join(', ')} — Generated: {new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' })}
+        </Text>
+
+        {/* Summary */}
+        <View style={styles.statsRow}>
+          <View style={styles.statBox}>
+            <Text style={styles.statValue}>{attended}</Text>
+            <Text style={styles.statLabel}>Attended</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statValue}>{total}</Text>
+            <Text style={styles.statLabel}>Total Sessions</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statValue}>{pct}%</Text>
+            <Text style={styles.statLabel}>Attendance Rate</Text>
+          </View>
+        </View>
+
+        {/* Session-by-session breakdown */}
+        <Text style={styles.sectionTitle}>Session Breakdown</Text>
+        <View style={styles.headerRow}>
+          <Text style={[styles.cellWide, styles.bold]}>Session</Text>
+          <Text style={[styles.cell, styles.bold]}>Date</Text>
+          <Text style={[styles.cellNarrow, styles.bold]}>Status</Text>
+          <Text style={[styles.cellNarrow, styles.bold]}>Source</Text>
+        </View>
+        {sessions.map((s, i) => {
+          const date = new Date(s.date).toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: 'short',
+            year: '2-digit',
+          })
+          return (
+            <View key={i} style={styles.row}>
+              <Text style={styles.cellWide}>{s.title}</Text>
+              <Text style={styles.cell}>{date}</Text>
+              <Text style={styles.cellNarrow}>{s.status}</Text>
+              <Text style={styles.cellNarrow}>{s.source ? SOURCE_LABELS[s.source] || s.source : '—'}</Text>
+            </View>
+          )
+        })}
+
+        {sessions.length === 0 && (
+          <Text style={{ color: '#999', marginTop: 8 }}>No sessions found.</Text>
+        )}
+      </Page>
+    </Document>
+  )
+}

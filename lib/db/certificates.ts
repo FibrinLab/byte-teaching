@@ -14,6 +14,11 @@ export interface CertificateWithSession extends Certificate {
   departments: {
     id: string
     name: string
+    lead_name?: string | null
+  } | null
+  organizations: {
+    id: string
+    name: string
   } | null
 }
 
@@ -108,19 +113,33 @@ export async function findCertificateForDownload(
 export async function findCertificateByCode(
   code: string
 ): Promise<CertificateWithSession | null> {
-  const db = await getDb()
+  const { getServiceDb } = await import('./client')
+  const db = await getServiceDb()
   const { data, error } = await db
     .from('certificates')
     .select(
       `*,
        sessions:session_id (id, title, date_start, description),
-       departments:department_id (id, name)`
+       departments:department_id (id, name, lead_name),
+       organizations:org_id (id, name)`
     )
     .eq('certificate_code', code)
     .maybeSingle()
 
   if (error) throw toDbError('Failed to fetch certificate', error)
-  return (data as CertificateWithSession | null) ?? null
+  if (!data) return null
+
+  // Flatten array embeds from Supabase
+  const row = data as Record<string, unknown>
+  const flatten = <T,>(v: T | T[] | null): T | null =>
+    !v ? null : Array.isArray(v) ? v[0] ?? null : v
+
+  return {
+    ...data,
+    sessions: flatten(row.sessions as CertificateWithSession['sessions']),
+    departments: flatten(row.departments as CertificateWithSession['departments']),
+    organizations: flatten(row.organizations as CertificateWithSession['organizations']),
+  } as CertificateWithSession
 }
 
 // -----------------------------------------------------------------------------

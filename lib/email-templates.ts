@@ -95,7 +95,7 @@ export function buildCertificateEmailHtml(
     <div style="font-family:monospace;max-width:600px;margin:0 auto;padding:20px;">
       <h2 style="border-bottom:2px solid #000;padding-bottom:10px;">Your Attendance Certificate</h2>
       <p style="margin:20px 0;">Dear ${recipientName},</p>
-      <p style="margin:20px 0;">Thank you for attending <strong>${sessionTitle}</strong>. Your attendance certificate is attached to this email.</p>
+      <p style="margin:20px 0;">Thank you for attending <strong>${sessionTitle}</strong>. Your attendance certificate is now ready for download when you sign in to your dashboard.</p>
       <p style="font-size:12px;color:#666;margin-top:20px;border-top:1px solid #ccc;padding-top:10px;">
         This email was sent via Byte Teaching.
       </p>
@@ -255,6 +255,98 @@ export function buildPasswordlessLoginEmailHtml(
       <a href="${params.inviteUrl}" style="display:inline-block;background:#000;color:#fff;padding:12px 24px;text-decoration:none;font-family:monospace;font-size:14px;">
         Sign In
       </a>
+    `
+  )
+}
+
+interface TraineeSessionReportParams {
+  recipientName: string
+  sessionTitle: string
+  sessionDate: string
+  departmentName: string
+  attendanceStatus: string
+  totalResponses: number
+  averageRating: number
+  ratingDistribution: Record<number, number>
+  comments: string[]
+}
+
+export function buildTraineeSessionReportEmailHtml(params: TraineeSessionReportParams): string {
+  const {
+    recipientName,
+    sessionTitle,
+    sessionDate,
+    departmentName,
+    attendanceStatus,
+    totalResponses,
+    averageRating,
+    ratingDistribution,
+    comments,
+  } = params
+
+  const statusColor = attendanceStatus === 'PRESENT' ? '#16a34a' : attendanceStatus === 'LATE' ? '#ca8a04' : '#dc2626'
+
+  const ratingBars = [5, 4, 3, 2, 1].map(star => {
+    const count = ratingDistribution[star] || 0
+    const pct = totalResponses > 0 ? Math.round((count / totalResponses) * 100) : 0
+    return `
+      <tr>
+        <td style="padding:2px 6px 2px 0;font-weight:bold;white-space:nowrap;">${star} ★</td>
+        <td style="padding:2px 0;width:100%;">
+          <div style="background:#eee;height:12px;border:1px solid #ccc;">
+            <div style="background:#000;height:100%;width:${pct}%;"></div>
+          </div>
+        </td>
+        <td style="padding:2px 0 2px 6px;white-space:nowrap;">${count}</td>
+      </tr>
+    `
+  }).join('')
+
+  const commentsSection = comments.length > 0
+    ? `
+      <h3 style="font-size:13px;margin:16px 0 8px;">Session Comments</h3>
+      ${comments.map(c => `
+        <div style="border-left:3px solid #000;padding:6px 10px;margin:6px 0;background:#fafafa;">
+          <p style="margin:0;font-size:12px;">${c}</p>
+        </div>
+      `).join('')}
+    `
+    : ''
+
+  return buildMonospaceEmailShell(
+    'Your Session Report',
+    `
+      <p style="margin:16px 0;">Dear ${recipientName},</p>
+      <p style="margin:16px 0;">Here is your report for <strong>${sessionTitle}</strong> on ${sessionDate} (${departmentName}).</p>
+
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        <tr>
+          <td style="padding:6px 0;font-weight:bold;">Your Attendance:</td>
+          <td style="padding:6px 0;"><span style="color:${statusColor};font-weight:bold;">${attendanceStatus}</span></td>
+        </tr>
+      </table>
+
+      <h3 style="font-size:13px;margin:16px 0 8px;">Session Feedback Summary</h3>
+      <table style="width:100%;border-collapse:collapse;margin:8px 0;">
+        <tr>
+          <td style="padding:4px 0;font-weight:bold;">Responses:</td>
+          <td style="padding:4px 0;">${totalResponses}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 0;font-weight:bold;">Average Rating:</td>
+          <td style="padding:4px 0;">${averageRating > 0 ? `${averageRating}/5` : '—'}</td>
+        </tr>
+      </table>
+
+      ${totalResponses > 0 ? `
+        <table style="width:100%;border-collapse:collapse;margin:8px 0;">
+          ${ratingBars}
+        </table>
+      ` : ''}
+
+      ${commentsSection}
+
+      <p style="margin:16px 0;font-weight:bold;">Your attendance certificate is attached to this email.</p>
     `
   )
 }
